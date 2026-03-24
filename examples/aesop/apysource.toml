@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+#
+# SPDX-License-Identifier: ISC
+
+# Aesop's Fables example — apysource configuration
+
+project_root = "."
+rdf_subdir = "rdf"
+sources_cache_subdir = "data/sources"
+
+# ── Repos + registry ─────────────────────────────────────────────────────
+
+gutenberg_url_pattern = "gutenberg\\.org/ebooks/(\\d+)"
+gutenberg_base_url = "https://www.gutenberg.org"
+
+["apysource.repos.gutenberg.GutenbergRepo repo_gutenberg"]
+url_pattern = "{gutenberg_url_pattern}"
+base_url = "{gutenberg_base_url}"
+
+["apysource.repos.RepoRegistry registry"]
+repos = ["{repo_gutenberg}"]
+sources_cache_dir = "{sources_cache_subdir}"
+
+# ── CLI ───────────────────────────────────────────────────────────────────
+
+["apysource.cli._base.CLIContext ctx"]
+project_root = "{project_root}"
+rdf_subdir = "{rdf_subdir}"
+sources_cache_subdir = "{sources_cache_subdir}"
+
+["apysource.cli.validate.ValidateCommand validate_cmd"]
+ctx = "{ctx}"
+
+["apysource.cli.check_sources.CheckSourcesCommand check_sources_cmd"]
+ctx = "{ctx}"
+registry = "{registry}"

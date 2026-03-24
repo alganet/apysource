@@ -1,0 +1,99 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+#
+# SPDX-License-Identifier: ISC
+
+@prefix sv:      <https://alganet.github.io/apysource#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix prov:    <http://www.w3.org/ns/prov#> .
+@prefix oa:      <http://www.w3.org/ns/oa#> .
+@prefix bibo:    <http://purl.org/ontology/bibo/> .
+@prefix skos:    <http://www.w3.org/2004/02/skos/core#> .
+@prefix schema:  <https://schema.org/> .
+
+# ── Ontology metadata ────────────────────────────────────────────────────
+
+sv: a owl:Ontology ;
+    rdfs:label "apysource vocabulary" ;
+    dcterms:description """Minimal vocabulary for cache-based source verification.
+
+Reuses standard properties wherever possible:
+  - schema:url for source URLs
+  - dcterms:format, dcterms:title, dcterms:issued, dcterms:language for metadata
+  - dcterms:isPartOf for hierarchical sources
+  - dcterms:license, dcterms:publisher for provenance
+  - bibo:isbn, bibo:doi, bibo:pageStart, bibo:pageEnd for bibliographic data
+  - oa:hasTarget, oa:hasSource, oa:hasSelector for annotation targeting
+  - oa:TextQuoteSelector (oa:exact) for snippet text
+  - oa:CssSelector for CSS selectors
+  - oa:motivatedBy oa:identifying for annotation purpose
+  - prov:wasGeneratedBy for verification activity links
+
+Only defines classes and properties with no standard equivalent.""" ;
+    dcterms:license <https://opensource.org/licenses/ISC> ;
+    owl:versionInfo "0.3.0" .
+
+# ══════════════════════════════════════════════════════════════════════════
+# Classes
+# ══════════════════════════════════════════════════════════════════════════
+
+sv:Source a owl:Class ;
+    rdfs:label "Source" ;
+    rdfs:comment "A citable source document (book, webpage, corpus). Use schema:url for the fetch URL, dcterms:format for media type, dcterms:title/issued/language for metadata." ;
+    rdfs:subClassOf prov:Entity, bibo:Document .
+
+sv:Fragment a owl:Class ;
+    rdfs:label "Fragment" ;
+    rdfs:comment "A text selection from a source, modeled as an OA Annotation. The source is linked via oa:hasTarget/oa:hasSource. The snippet text lives on oa:exact (TextQuoteSelector). CSS selectors use oa:CssSelector. Human-readable section paths use sv:SectionSelector." ;
+    rdfs:subClassOf oa:Annotation .
+
+sv:Term a owl:Class ;
+    rdfs:label "Term" ;
+    rdfs:comment "A term or entry with direct source backing (e.g. glossary entry, etymology). Typically authored in Turtle, not YAML — the check command verifies Terms via the 'direct' resolution mode (schema:url on the entity itself)." ;
+    rdfs:subClassOf skos:Concept .
+
+sv:SectionSelector a owl:Class ;
+    rdfs:label "Section Selector" ;
+    rdfs:comment """A selector using human-readable section paths. Value stored in rdf:value.
+
+Selector syntax (comma-separated parts, evaluated left-to-right):
+  - Heading match: 'Preamble', 'Chapter I' (case-insensitive, roman numeral equivalence)
+  - Numbered section: 'Article 1', 'paragraph 3'
+  - Quoted title: '\"The Fox and the Grapes\"'
+  - Nested path: 'Chapter I, Article 1, paragraph 2'
+
+Roman numeral equivalence: 'Chapter IV' matches 'Chapter 4' and vice versa.""" ;
+    rdfs:subClassOf oa:Selector .
+
+sv:VerificationActivity a owl:Class ;
+    rdfs:label "Verification Activity" ;
+    rdfs:comment "A verification run performed by apysource. Linked from fragments via prov:wasGeneratedBy. Timestamps on prov:startedAtTime/endedAtTime." ;
+    rdfs:subClassOf prov:Activity .
+
+# ══════════════════════════════════════════════════════════════════════════
+# Properties (only those with no standard equivalent)
+# ══════════════════════════════════════════════════════════════════════════
+
+sv:sourceLocation a owl:DatatypeProperty ;
+    rdfs:label "source location" ;
+    rdfs:comment "Opaque location string for repo-based extraction (e.g. 'chapter:1'). Interpreted by the repo module that handles the source URL." ;
+    rdfs:range xsd:string .
+
+sv:sourceLines a owl:DatatypeProperty ;
+    rdfs:label "source lines" ;
+    rdfs:comment "Line range to extract from plain text (e.g. '10-20', 1-based inclusive)." ;
+    rdfs:range xsd:string .
+
+sv:edition a owl:DatatypeProperty ;
+    rdfs:label "edition" ;
+    rdfs:comment "Edition or version of the source document." ;
+    rdfs:range xsd:string ;
+    rdfs:domain sv:Source .
+
+sv:verificationStatus a owl:DatatypeProperty ;
+    rdfs:label "verification status" ;
+    rdfs:comment "Outcome of the most recent verification: 'verified', 'failed', or 'pending'." ;
+    rdfs:range xsd:string .

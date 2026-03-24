@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+#
+# SPDX-License-Identifier: ISC
+
+@prefix sv:      <https://alganet.github.io/apysource#> .
+@prefix sh:      <http://www.w3.org/ns/shacl#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix oa:      <http://www.w3.org/ns/oa#> .
+@prefix schema:  <https://schema.org/> .
+
+# ── Source shape ──────────────────────────────────────────────────────────
+
+sv:SourceShape a sh:NodeShape ;
+    sh:targetClass sv:Source ;
+    sh:property [
+        sh:path schema:url ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "Source must have exactly one schema:url"
+    ] ;
+    sh:property [
+        sh:path rdfs:label ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "Source must have an rdfs:label"
+    ] .
+
+# ── Fragment shape ────────────────────────────────────────────────────────
+
+sv:FragmentShape a sh:NodeShape ;
+    sh:targetClass sv:Fragment ;
+    sh:property [
+        sh:path oa:hasTarget ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:node sv:AnnotationTargetShape ;
+        sh:message "Fragment must have exactly one oa:hasTarget"
+    ] ;
+    sh:property [
+        sh:path rdfs:label ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "Fragment must have an rdfs:label"
+    ] .
+
+# ── Annotation target shape (validates OA chain) ─────────────────────────
+
+sv:AnnotationTargetShape a sh:NodeShape ;
+    sh:property [
+        sh:path oa:hasSource ;
+        sh:minCount 1 ;
+        sh:class sv:Source ;
+        sh:message "Annotation target must link to a sv:Source via oa:hasSource"
+    ] .
+
+# ── Term shape ────────────────────────────────────────────────────────────
+
+sv:TermShape a sh:NodeShape ;
+    sh:targetClass sv:Term ;
+    sh:property [
+        sh:path schema:url ;
+        sh:minCount 1 ;
+        sh:message "Term must have at least one schema:url"
+    ] ;
+    sh:property [
+        sh:path rdfs:label ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "Term must have an rdfs:label"
+    ] .
