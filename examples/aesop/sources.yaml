@@ -1,0 +1,21 @@
+# Aesop's Fables — source verification via YAML.
+#
+# Uses the Gutenberg repo module for chapter-based extraction.
+# First run fetches and caches; subsequent runs verify from cache.
+#
+# Run: apysource check sources.yaml
+
+sources:
+  - label: "Aesop's Fables"
+    url: "https://www.gutenberg.org/ebooks/11339"
+    type: text/html
+    language: en
+    publisher: "Project Gutenberg"
+    fragments:
+      - label: "The Fox and the Grapes"
+        location: "chapter:1"
+        snippet: "A Fox one day spied a beautiful bunch of ripe Grapes hanging from a vine trained along the branches of a tree"
+
+      - label: "The Tortoise and the Hare"
+        location: "chapter:2"
+        snippet: "A Hare was making fun of the Tortoise one day for being so slow"

@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+#
+# SPDX-License-Identifier: ISC
+
+@prefix sv:      <https://alganet.github.io/apysource#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix oa:      <http://www.w3.org/ns/oa#> .
+@prefix schema:  <https://schema.org/> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix ex:      <http://example.org/aesop#> .
+
+# ── Source ────────────────────────────────────────────────────────────────
+
+ex:aesop_fables a sv:Source ;
+    rdfs:label "Aesop's Fables" ;
+    schema:url "https://www.gutenberg.org/ebooks/11339" ;
+    dcterms:format "text/html" ;
+    dcterms:language "en" ;
+    dcterms:publisher "Project Gutenberg" .
+
+# ── Fragments ─────────────────────────────────────────────────────────────
+
+ex:fox_and_grapes a sv:Fragment ;
+    rdfs:label "The Fox and the Grapes" ;
+    sv:sourceLocation "chapter:1" ;
+    oa:motivatedBy oa:identifying ;
+    oa:hasTarget [
+        a oa:SpecificResource ;
+        oa:hasSource ex:aesop_fables ;
+        oa:hasSelector [
+            a oa:TextQuoteSelector ;
+            oa:exact "A Fox one day spied a beautiful bunch of ripe Grapes hanging from a vine trained along the branches of a tree"
+        ]
+    ] .
+
+ex:tortoise_and_hare a sv:Fragment ;
+    rdfs:label "The Tortoise and the Hare" ;
+    sv:sourceLocation "chapter:2" ;
+    oa:motivatedBy oa:identifying ;
+    oa:hasTarget [
+        a oa:SpecificResource ;
+        oa:hasSource ex:aesop_fables ;
+        oa:hasSelector [
+            a oa:TextQuoteSelector ;
+            oa:exact "A Hare was making fun of the Tortoise one day for being so slow"
+        ]
+    ] .

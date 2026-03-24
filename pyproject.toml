@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+#
+# SPDX-License-Identifier: ISC
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apysource"
+version = "0.3.0"
+description = "Verify that your sources still say what you think they say"
+readme = "README.md"
+license = "ISC"
+authors = [{name = "Alexandre Gomes Gaigalas", email = "alganet@gmail.com"}]
+keywords = ["source", "verification", "citation", "quotes", "crawl", "cache"]
+requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Topic :: Text Processing :: Markup",
+    "Topic :: Software Development :: Quality Assurance",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "rdflib>=7.0",
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "pyyaml>=6.0",
+]
+
+[project.urls]
+Repository = "https://github.com/alganet/apysource"
+Issues = "https://github.com/alganet/apysource/issues"
+
+[project.scripts]
+apysource = "apysource.cli.__main__:main"
+
+[project.optional-dependencies]
+shacl = ["pyshacl>=0.26"]
+dev = [
+    "pytest>=9.0",
+    "slipcover>=1.0",
+    "pyshacl>=0.26",
+    "apywire>=1.0",
+    "mypy>=1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["apysource*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+warn_return_any = true
+check_untyped_defs = true
+ignore_missing_imports = true
+disable_error_code = ["import-untyped"]
+
+[[tool.mypy.overrides]]
+module = "apysource._defaults"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["apysource.repos.wiktionary", "apysource.repos.wikisource", "apysource.repos.gutenberg", "apysource.repos.archive", "apysource.repos.gutenberg_bible", "apysource.repos.gutenberg_classical"]
+ignore_errors = true

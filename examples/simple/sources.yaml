@@ -1,0 +1,22 @@
+# Simple source verification example.
+# Run: apysource check sources.yaml
+
+sources:
+  - label: "UN Charter"
+    url: "https://www.un.org/en/about-us/un-charter/full-text"
+    type: text/html
+    fragments:
+      - label: "Preamble"
+        section: "Preamble"
+        snippet: "to save succeeding generations from the scourge of war"
+      - label: "Article 2 principles"
+        section: "Article 2, paragraph 1"
+        snippet: "The Organization and its Members, in pursuit of the Purposes stated in Article 1, shall act in accordance with the following Principles"
+
+  - label: "RFC 2616"
+    url: "https://www.rfc-editor.org/rfc/rfc2616.txt"
+    type: text/plain
+    fragments:
+      - label: "HTTP Overview"
+        lines: "40-41"
+        snippet: "The Hypertext Transfer Protocol (HTTP) is an application-level protocol"

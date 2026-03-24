@@ -1,0 +1,86 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+#
+# SPDX-License-Identifier: ISC
+
+# apysource Configuration Example
+
+# ── Paths ─────────────────────────────────────────────────────────────────
+
+project_root = "."
+rdf_subdir = "rdf"
+sources_cache_subdir = "data/sources"
+http_cache_dir = "data/cache"
+
+# ── Constants ────────────────────────────────────────────────────────────
+
+user_agent = "apysource/1.0 (source verification; gentle crawler)"
+default_crawl_delay = 3.0
+default_http_timeout = 30
+
+# ── URL patterns and base URLs ────────────────────────────────────────────
+
+archive_url_pattern = "archive\\.org/details/(.+?)(?:/|$|\\?|#)"
+archive_base_url = "https://archive.org"
+
+gutenberg_url_pattern = "gutenberg\\.org/ebooks/(\\d+)"
+gutenberg_base_url = "https://www.gutenberg.org"
+
+wikisource_url_pattern = "wikisource\\.org/wiki/(.+?)(?:\\?|#|$)"
+wikisource_base_url = "https://en.wikisource.org"
+
+wiktionary_url_pattern = "wiktionary\\.org/wiki/(.+)"
+wiktionary_base_url = "https://en.wiktionary.org"
+
+# ── HTTP client ──────────────────────────────────────────────────────────
+
+["apysource.http.CachedFetcher http_client"]
+cache_dir = "{http_cache_dir}"
+user_agent = "{user_agent}"
+default_delay = "{default_crawl_delay}"
+default_timeout = "{default_http_timeout}"
+
+# ── Wired repos ───────────────────────────────────────────────────────────
+
+["apysource.repos.archive.ArchiveRepo repo_archive"]
+url_pattern = "{archive_url_pattern}"
+base_url = "{archive_base_url}"
+
+["apysource.repos.gutenberg.GutenbergRepo repo_gutenberg"]
+url_pattern = "{gutenberg_url_pattern}"
+base_url = "{gutenberg_base_url}"
+
+["apysource.repos.wikisource.WikisourceRepo repo_wikisource"]
+url_pattern = "{wikisource_url_pattern}"
+base_url = "{wikisource_base_url}"
+
+["apysource.repos.wiktionary.WiktionaryRepo repo_wiktionary"]
+url_pattern = "{wiktionary_url_pattern}"
+base_url = "{wiktionary_base_url}"
+
+# ── Registry (provides shared cache_dir + http_client to repos) ──────────
+
+["apysource.repos.RepoRegistry registry"]
+repos = ["{repo_archive}", "{repo_gutenberg}", "{repo_wikisource}", "{repo_wiktionary}"]
+sources_cache_dir = "{sources_cache_subdir}"
+http_client = "{http_client}"
+
+# ── CLI ───────────────────────────────────────────────────────────────────
+
+["apysource.cli._base.CLIContext ctx"]
+project_root = "{project_root}"
+rdf_subdir = "{rdf_subdir}"
+sources_cache_subdir = "{sources_cache_subdir}"
+
+["apysource.cli.validate.ValidateCommand validate_cmd"]
+ctx = "{ctx}"
+
+["apysource.cli.check_sources.CheckSourcesCommand check_sources_cmd"]
+ctx = "{ctx}"
+registry = "{registry}"
+fetcher = "{http_client}"
+
+["apysource.cli.locate.LocateCommand locate_cmd"]
+http_client = "{http_client}"
+
+["apysource.cli.add.AddCommand add_cmd"]
+http_client = "{http_client}"

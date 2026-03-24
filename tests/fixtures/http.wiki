@@ -1,0 +1,520 @@
+{{Short description|Application layer protocol}}
+{{pp-pc}}
+{{Infobox protocol
+| image       = HTTP logo.svg{{!}}180px
+| standard    = {{indented plainlist|
+* {{IETF RFC|1945}} HTTP/1.0
+* {{IETF RFC|9110}} HTTP Semantics
+* {{IETF RFC|9111}} HTTP Caching
+* {{IETF RFC|9112}} HTTP/1.1
+* {{IETF RFC|9113}} [[HTTP/2]]
+* {{IETF RFC|7541}} HTTP/2: HPACK Header Compression
+* {{IETF RFC|8164}} HTTP/2: Opportunistic Security for HTTP/2
+* {{IETF RFC|8336}} HTTP/2: The ORIGIN HTTP/2 Frame
+* {{IETF RFC|8441}} HTTP/2: Bootstrapping WebSockets with HTTP/2
+* {{IETF RFC|9114}} [[HTTP/3]]
+* {{IETF RFC|9204}} HTTP/3: QPACK: Field Compression
+}}
+| developer   = Initially [[CERN]]; [[IETF]], [[W3C]]
+| introdate   = {{Start date and age|1991|df=yes}}
+| newer       =
+|website={{URL|https://httpwg.org/specs/}}}}
+{{HTTP}}
+{{IPstack}}
+
+'''HTTP''' ('''Hypertext Transfer Protocol''') is an [[application layer]] protocol in the [[Internet protocol suite]] for distributed, collaborative, [[hypermedia]] information systems.<ref name="Internet Engineering Task Force-2022" /> HTTP is the foundation of data communication for the [[World Wide Web]], where [[hypertext]] documents include [[hyperlink]]s to other resources that the user can easily access, for example by a [[Computer mouse|mouse]] click or by tapping the screen in a [[web browser]].
+
+HTTP is a [[request–response]] protocol in the [[client–server model]]. A transaction starts with a client submitting a request to the server, the server attempts to satisfy the request and returns a response to the client that describes the disposition of the request and optionally contains a requested resource such as an [[HTML]] document or other content.
+
+In a common scenario, a [[web browser]] acts as the [[client (computing)|client]], and a [[web server]], [[Host (network)|hosting]] one or more [[website]]s, is the [[server (computing)|server]]. A web browser is an example of a [[user agent]] (UA). Other types of user agent include the indexing software used by search providers ([[web crawler]]s), [[voice browser]]s, [[mobile app]]s, and other [[software]] that accesses, consumes, or displays web content.
+
+HTTP is designed to permit intermediate network elements to improve or enable communications between clients and servers. High-traffic websites often benefit from [[web cache]] servers that deliver content on behalf of [[upstream server]]s to improve response time. Web browsers cache previously accessed web resources and reuse them, whenever possible, to reduce network traffic. HTTP [[proxy server]]s at [[private network]] boundaries can facilitate communication for clients without a globally routable address, by relaying messages with external servers.
+
+To allow intermediate HTTP nodes (proxy servers, web caches, etc.) to accomplish their functions, some of the [[List of HTTP header fields|HTTP headers]] (found in HTTP requests/responses) are managed [[hop-by-hop transport|hop-by-hop]] whereas other HTTP headers are managed [[end-to-end principle|end-to-end]] (managed only by the source client and by the target web server).
+
+A [[web resource]] is located by a [[uniform resource locator]] (URL), using the [[Uniform Resource Identifier]] (URI) schemes ''http'' and ''[[https]]''. URIs are encoded as [[hyperlink]]s in [[HTML]] documents, so as to form interlinked [[hypertext]] documents.{{Ref RFC|3986}}
+
+==Versions==
+{{See also|CERN httpd}}
+The protocol has been revised over time. A version is identified as HTTP/# where # is the version number. This article covers aspects of all versions but provides primary coverage for HTTP/0.9, HTTP/1.0, and HTTP/1.1. Separate articles cover [[HTTP/2]] and [[HTTP/3]] in detail.
+
+{| class="wikitable"
+|-
+!Version
+!Introduced
+!Status
+|-
+|0.9
+|1991
+|{{no|Obsolete}}
+|-
+|1.0
+|1996
+|{{no|Obsolete}}
+|-
+|1.1
+|1997
+|{{yes|Standard}}
+|-
+|2
+|2015
+|{{yes|Standard}}
+|-
+|3
+|2022
+|{{yes|Standard}}
+|}
+
+In HTTP/1.0, a separate TCP [[connection-oriented communication|connection]] to the same server is made for every resource request.{{Ref RFC|1945|rsection=1.3}}
+
+In HTTP/1.1, instead a TCP connection can be reused to make multiple resource requests (i.e. of HTML pages, frames, images, [[Client-side scripting|scripts]], [[Cascading Style Sheets|stylesheets]], etc.).{{Ref RFC|9112|rsection=9.1,9.3}} HTTP/1.1 communications therefore experience less [[network latency|latency]] as the establishment of TCP connections presents considerable overhead, especially under high traffic conditions.<ref>{{cite web |url=https://www.w3.org/Protocols/Classic.html |title=Classic HTTP Documents |publisher=W3.org |date=1998-05-14 |access-date=2010-08-01}}</ref>
+
+Enhancements added with HTTP/2 allow for less latency and, in most cases, higher speeds than HTTP/1.1 communications. HTTP/2 adds support for:
+
+* a compressed binary representation of metadata (HTTP headers) instead of a textual one, so that headers require much less space;
+* a single [[Internet Protocol suite|TCP/IP]] (usually [[encryption|encrypted]]) connection per accessed server domain instead of 2 to 8 TCP/IP connections;
+* one or more bidirectional streams per TCP/IP connection in which HTTP requests and responses are broken down and transmitted in small packets to almost solve the problem of the HOLB ([[head-of-line blocking]]);{{refn|group=note|In practice, these streams are used as multiple TCP/IP sub-connections to [[multiplexing|multiplex]] concurrent requests/responses, thus greatly reducing the number of real TCP/IP connections on server side, from 2..8 per client to 1, and allowing many more clients to be served at once.}}
+* a push capability to allow server application to send data to clients whenever new data is available (without forcing clients to request periodically new data to server by using [[Polling (computer science)|polling]] methods).{{Ref RFC|9113|rsection=2}}
+
+HTTP/3 uses [[QUIC]] + UDP transport protocols instead of TCP. Only the IP layer is used (which UDP, like TCP, builds on). This slightly improves the average speed of communications and avoids the occasional problem of TCP connection [[TCP congestion control |congestion]] that can temporarily block or slow down the data flow of all its streams (another form of "''head of line blocking''").
+
+==Use==
+
+HTTP/2 is supported by 71% of websites<ref>{{Cite web|title=Usage Statistics of HTTP/2 for websites|url=https://w3techs.com/technologies/details/ce-http2|access-date=2026-01-21|website=w3techs.com}}</ref><ref>{{Cite web |title=Usage Statistics of HTTP/3 for Websites, January 2026 |url=https://w3techs.com/technologies/details/ce-http3 |access-date=2026-01-21 |website=w3techs.com}}</ref> (34.1% HTTP/2 + 36.9% HTTP/3 with backwards compatibility) and supported by almost all web browsers (over 98% of users).<ref>{{Cite web|title=Can I use... Support tables for HTML5, CSS3, etc|url=https://caniuse.com/?search=http2|access-date=2024-01-05|website=caniuse.com}}</ref> It is also supported by major web servers over [[Transport Layer Security]] (TLS) using an [[Application-Layer Protocol Negotiation]] (ALPN) extension{{Ref RFC|7301}} where [[TLS 1.2]] or newer is required.{{Ref RFC|9113}}
+
+HTTP/3 is used on 36.9% of websites<ref>{{Cite web|title=Usage Statistics of HTTP/3 for websites|url=https://w3techs.com/technologies/details/ce-http3|access-date=2026-01-18|website=w3techs.com}}</ref> and is supported by most web browsers, i.e. (at least partially) supported by 97% of users.<ref>{{Cite web|title=Can I use... Support tables for HTML5, CSS3, etc|url=https://caniuse.com/?search=http3|access-date=2024-01-08|website=canIuse.com}}</ref> HTTP/3 uses [[QUIC]] instead of [[Transmission Control Protocol|TCP]] for the underlying transport protocol. Like HTTP/2, it does not obsolete previous major versions of the protocol. In 2019, support for HTTP/3 was first added to [[Cloudflare]] and [[Google Chrome|Chrome]]<ref>{{cite web|url=https://www.zdnet.com/article/cloudflare-google-chrome-and-firefox-add-http3-support/|title=Cloudflare, Google Chrome, and Firefox add HTTP/3 support|website=ZDNet|date=26 September 2019|access-date=27 September 2019|df=dmy-all|first=Catalin|last=Cimpanu}}</ref><ref>{{Cite web|url=https://blog.cloudflare.com/http3-the-past-present-and-future/|title=HTTP/3: the past, the present, and the future|date=2019-09-26|website=The Cloudflare Blog|language=en|access-date=2019-10-30}}</ref> and also enabled in [[Firefox]].<ref>{{cite web |url=https://community.cloudflare.com/t/firefox-nightly-supports-http-3/127778 |title=Firefox Nightly supports HTTP 3 – General – Cloudflare Community |date=2019-11-19 |access-date=2020-01-23}}</ref> HTTP/3 has lower latency for real-world web pages and loads faster than HTTP/2, in some cases over three times faster than HTTP/1.1, which is still commonly the only protocol enabled.<!-- The article written before HTTP/3 standardization, but after OUIC standardized, and that part of the article (and the link there links to older standard: "0-RTT should not be blindly enabled. There are some possible security concerns depending on your threat model." --><ref>{{Cite web |title=HTTP/3 is Fast |url=https://requestmetrics.com/web-performance/http3-is-fast |access-date=2022-07-01 |website=Request Metrics |language=en}}</ref>
+
+[[HTTPS]], the secure variant of HTTP, is used by more than 85% of websites.<ref>{{Cite web|title=Usage Statistics of Default protocol https for websites|url=https://w3techs.com/technologies/details/ce-httpsdefault|access-date=2024-01-05|website=w3techs.com}}</ref>
+
+==Technology==
+
+===Transport layer===
+HTTP presumes an underlying and reliable [[transport layer]] protocol.{{Ref RFC|9110|rsection=3.3}} The standard choice of the underlying protocol prior to HTTP/3 is [[Transmission Control Protocol]] (TCP). HTTP/3 uses a different transport layer called [[QUIC]], which provides reliability on top of the unreliable [[User Datagram Protocol]] (UDP). HTTP/1.1 and earlier have been adapted to be used over plain unreliable UDP in [[multicast]] and [[unicast]] situations, forming HTTPMU and HTTPU. They are used in [[UPnP]] and [[Simple Service Discovery Protocol]] (SSDP), two protocols usually run on a [[local area network]].
+
+===Data exchange===
+HTTP is a [[stateless protocol|stateless]] application-level protocol and it requires a reliable network transport connection to exchange data between client and server.<ref name="Connections">{{cite IETF |rfc=9110 |section=3.3 |sectionname=Connections, Clients, and Servers |title=RFC 9110, HTTP Semantics}}</ref> In HTTP implementations, [[Transmission Control Protocol|TCP/IP]] connections are used using [[List of TCP and UDP port numbers#Well-known ports|well-known ports]] (typically [[TCP port|port 80]] if the connection is unencrypted or port 443 if the connection is encrypted, see also [[List of TCP and UDP port numbers]]).{{Ref RFC|9110|rsection=4.2.1,4.2.2}} In HTTP/2, a TCP/IP connection plus multiple protocol channels are used. In HTTP/3, the application transport protocol [[QUIC]] over UDP is used.
+
+====Request and response messages through connections====
+Data is exchanged through a sequence of [[Request-response|request–response messages]] which are exchanged by a [[session layer]] transport connection.<ref name="Connections" /> An HTTP client initially tries to establish a connection, real or virtual, with a server. An HTTP server listening on the port accepts the connection and then waits for a client's request message. The client sends its HTTP request message. Upon receiving the request the server sends back an HTTP response message, which includes header(s) plus a body if it is required. The body of this response message is typically the requested resource, although an error message or other information may also be returned. At any time and for many reasons, either the client or server can close the connection. Closing a connection is usually advertised by one or more HTTP headers in the last request or response.{{Ref RFC|9112|rsection=9.1}}
+
+====Persistent connections====
+{{Main|HTTP persistent connection}}
+In HTTP/0.9, the TCP/IP connection is always closed after server response has been sent, so it is never persistent.
+
+In HTTP/1.0, the TCP/IP connection should always be closed by server after a response has been sent.{{Ref RFC|1945}}{{refn|group=note|Since late 1996, some developers of popular HTTP/1.0 browsers and servers (specially those who had planned support for HTTP/1.1 too), started to deploy (as an unofficial extension) a sort of keep-alive-mechanism (by using new HTTP headers) in order to keep the TCP/IP connection open for more than a request/response pair and so to speed up the exchange of multiple requests/responses.<ref name="Sailu Reddy-2002">{{Cite book|url=https://www.oreilly.com/library/view/http-the-definitive/1565925092/ch04s05.html|title=HTTP: The Definitive Guide. (excerpt of chapter: "Persistent Connections")|author1=David Gourley|author2=Brian Totty|author3=Marjorie Sayer|author4=Anshu Aggarwal|author5=Sailu Reddy|language=en|publisher=O'Reilly Media, inc.|isbn=978-1-56592-509-0|year=2002|access-date=2021-10-18}}</ref>}}
+
+In HTTP/1.1, a keep-alive-mechanism was officially introduced so that a connection could be reused for more than one request/response. Such persistent connections reduce request [[Network latency|latency]] perceptibly because the client does not need to re-negotiate the [[Transmission Control Protocol#Connection establishment|TCP 3-Way-Handshake connection]] after the first request has been sent. Another positive side effect is that, in general, the connection becomes faster with time due to TCP's [[TCP congestion control#Slow start|slow-start]]-mechanism.
+
+HTTP/1.1 added also [[HTTP pipelining]] in order to further reduce lag time when using persistent connections by allowing clients to send multiple requests before waiting for each response.  This optimization was never considered really safe because a few web servers and many [[proxy server]]s, specially transparent proxy servers placed in Internet / [[Intranet]]s between clients and servers, did not handle pipelined requests properly (they served only the first request discarding the others, they closed the connection because they saw more data after the first request or some proxies even returned responses out of order etc.).  Because of this, only HEAD and some GET requests (i.e. limited to real file requests and so with [[URL]]s without query string used as a command, etc.) could be pipelined in a [[#Safe method|safe]] and [[#Idempotent method|idempotent]] mode.  After many years of struggling with the problems introduced by enabling pipelining, this feature was first disabled and then removed from most browsers also because of the announced adoption of HTTP/2.
+
+HTTP/2 extended the usage of persistent connections by multiplexing many concurrent requests/responses through a single TCP/IP connection.
+
+HTTP/3 does not use TCP/IP connections but QUIC + UDP.
+
+====Content retrieval optimizations====
+In HTTP/0.9, a requested resource was always sent in its entirety.
+
+HTTP/1.0 added headers to manage resources cached by a client in order to allow conditional GET requests. 
+
+* A server must return the entire content of the requested resource only if its last modified time is not known by the client or if it changed since the last full response to a GET request. 
+
+* Header {{code |Content-Encoding}} was added to specify whether the returned content is [[HTTP compression |compressed]]. 
+
+* If the size of the content is not known in advance (i.e. because it is dynamically generated) then the header <code>Content-Length</code> would ''not'' be included. The client would assume that transfer was complete when the connection closed, but a premature close would leave the client with partial content yet the client would not know it's partial.
+
+HTTP/1.1 introduced and later versions provide:
+
+* Headers to better manage the conditional retrieval of cached resources.
+
+* [[Chunked transfer encoding]] allows content to be streamed in chunks in order to reliably send it even when the server does not know its length in advance (i.e. because it is dynamically generated, etc.).
+
+* [[Byte serving |Byte range serving]] allows a client to request portions (ranges of bytes) of a resource. This is useful to resume an interrupted download (when a file is very large), when only a part of a content has to be shown or dynamically added to the already visible part by a browser (i.e. only the first or the following n comments of a web page) in order to spare time, bandwidth and system resources, etc.
+
+===Application session {{anchor |HTTP session}}===
+As a [[stateless protocol]], HTTP does not require the web server to retain information or status about each user for the duration of multiple requests. If a [[web application]] needs an [[Session (computer science)|application session]], it implements it via [[HTTP cookie]]s,<ref>{{Cite journal |last1=Lee |first1=Wei-Bin |last2=Chen |first2=Hsing-Bai |last3=Chang |first3=Shun-Shyan |last4=Chen |first4=Tzung-Her |date=2019-01-25 |title=Secure and efficient protection for HTTP cookies with self-verification |url=https://onlinelibrary.wiley.com/doi/10.1002/dac.3857 |journal=International Journal of Communication Systems |language=en |volume=32 |issue=2 |article-number=e3857 |doi=10.1002/dac.3857|s2cid=59524143 |url-access=subscription }}</ref> hidden [[variable (computer science)|variable]]s in a [[Form (web)|web form]] or another mechanism.
+
+Typically, to start a session, an interactive [[login]] is performed, and to end a session, a [[logout]] is requested by the user. These kind of operations use a custom [[authentication]] mechanism, not [[#Authentication|HTTP authentication]].
+
+===Authentication===
+HTTP provides multiple authentication schemes such as [[basic access authentication]] and [[digest access authentication]] which operate via a challenge–response mechanism whereby the server identifies and issues a challenge before serving the requested content.
+
+HTTP provides a general framework for access control and authentication, via an extensible set of challenge–response authentication schemes, which can be used by a server to challenge a client request and by a client to provide authentication information.{{Ref RFC|9110}}
+
+The authentication mechanisms described above belong to the HTTP protocol and are managed by client and server HTTP software (if configured to require authentication before allowing client access to one or more web resources), and not by the web applications using an [[#Application session|application session]].
+
+The HTTP authentication specification includes realms that provide an arbitrary, implementation-specific construct for further dividing resources common to a given root [[Uniform Resource Identifier|URI]]. The realm value string, if present, is combined with the canonical root URI to form the protection space component of the challenge. This in effect allows the server to define separate authentication scopes under one root URI.<ref name="Internet Engineering Task Force-2022" />
+
+===Encrypted connection===
+The most popular way of establishing an encrypted HTTP connection is [[HTTPS]].<ref>{{cite book |last=Canavan |first=John |title=Fundamentals of Networking Security |year=2001 |publisher=Artech House |location=Norwood, MA |isbn=978-1-58053-176-4 |pages=82–83}}</ref> Two other methods for establishing an encrypted HTTP connection also exist: [[Secure Hypertext Transfer Protocol]], and using the [[HTTP/1.1 Upgrade header]] to specify an upgrade to TLS. Browser support for these two is, however, nearly non-existent.<ref>{{cite web |last1=Zalewski |first1=Michal |title=Browser Security Handbook |url=https://code.google.com/p/browsersec/wiki/Part1#True_URL_schemes |access-date=30 April 2015|url-status=dead}}</ref><ref>{{cite web |title=Chromium Issue 4527: implement RFC 2817: Upgrading to TLS Within HTTP/1.1 |url=https://code.google.com/p/chromium/issues/detail?id=4527 |access-date=30 April 2015}}</ref><ref>{{cite web |title=Mozilla Bug 276813 – [RFE] Support RFC 2817 / TLS Upgrade for HTTP 1.1 |url=https://bugzilla.mozilla.org/show_bug.cgi?id=276813 |access-date=30 April 2015}}</ref>
+
+==Message format{{anchor |message-format}}==
+[[File:Http request telnet ubuntu.png|thumb|right|An HTTP/1.1 request made using telnet. The parts of the transaction are shown in different colors: request in red, response header in purple, and response body in green.]]
+
+This section describes messages for HTTP/1.1. Later versions, [[HTTP/2]]<ref>{{cite ietf |rfc=9113 |title=HTTP/2 |date=June 2022}}</ref> and [[HTTP/3]], use a [[Communication protocol#Binary|binary protocol]], where headers are encoded in a single <code>HEADERS</code> and zero or more <code>CONTINUATION</code> frames using HPACK<ref>{{cite ietf |rfc=7541 |title=HPACK: Header Compression for HTTP/2 |date=May 2015 |last1=Peon |first1=R. |last2=Ruellan |first2=H.}}</ref> (HTTP/2) or QPACK (HTTP/3), which both provide efficient header compression. The request or response line from HTTP/1 has also been replaced by several pseudo-header fields, each beginning with a colon (<code>:</code>).
+
+At the highest level, a message consists of a header followed by a body.
+
+===Header{{anchor |message-header}}===
+A header consists of lines of [[ASCII]] [[plain text|text]]; each terminated with a [[carriage return]] and [[line feed]] sequence. The layout for both a request and a response header is:
+
+; Start line: Structured data that differs for request vs. response.
+; Header fields: Zero or more [[HTTP request header field|header field]] lines (at least 1 for HTTP/1.1); see below.
+; Empty line: Marks the end of the header.
+
+===Body{{anchor |message-body}}===
+A body consists of data in any format; not limited to ASCII. The format must match that specified by the {{code |Content-Type}} header field if the message contains one. A body is optional or, in other words, can be blank.
+
+===Entity{{anchor |message-entity}}===
+Before HTTP/2, the term ''entity'' was used to mean the body plus header fields that describe the body. In particular, not all headers were considered part of the entity. The term ''entity header'' referred to a header that was considered part of the entity, and sometimes the body was called the ''entity body''. Modern documentation uses ''body'' and ''header'' without using ''entity''.
+
+===Header field{{anchor |message-header-field}}===
+{{See also |List of HTTP header fields}}
+A header field represents [[metadata]] about the containing message. Examples include how the body is encoded (via [[HTTP compression#Content-Encoding tokens|Content-Encoding]]), session verification and identification of the client (as in [[browser cookies]], IP address, [[user-agent]]) or their anonymity thereof (VPN or proxy masking, user-agent spoofing), how the server should handle data (as in [[Do-Not-Track]] or [[Global Privacy Control]]), and the age (the time it has resided in a shared [[web cache|cache]]) of the document being downloaded. Generally, the information of a header field is used by [[software]] and not shown to the [[User (computing)|user]].
+
+A header field line is formatted as a [[name-value pair]] with a colon separator. [[Whitespace (computer science)|Whitespace]] is not allowed around the name, but leading and trailing whitespace is ignored for the value part. Unlike a method name that must match exactly (case-sensitive),<ref>{{Cite ietf |date=June 2022 |rfc=9110 |title=HTTP Semantics |section=9.1  |sectionname=Methods: Overview}}</ref> a header field name is matched ignoring case although often shown with each word capitalized.<ref>{{Cite ietf |date=June 2022 |rfc=9110 |title=HTTP Semantics |section=5.1 |sectionname=Field Names}}</ref> For example, the following are header fields for {{code |Host}} and {{code |Accept-Language}}.
+
+ Host: www.example.com
+ Accept-Language: en
+
+The standards do not limit the size of a header field or the number of fields in a message. However, most servers, clients, and proxy software impose limits for practical and security reasons. For example, the Apache 2.3 server by default limits the size of each field to 8190 bytes, and there can be at most 100 header fields in a single request.<ref>{{cite web|url=http://httpd.apache.org/docs/2.3/mod/core.html#limitrequestfieldsize|archive-url=https://web.archive.org/web/20120509104709/https://httpd.apache.org/docs/2.3/mod/core.html#limitrequestfieldsize|archive-date=2012-05-09 |title=core - Apache HTTP Server |publisher=Httpd.apache.org |access-date=2012-03-13}}</ref>
+
+Although deprecated by RFC 7230,<ref>{{Cite ietf |date=June 2014 |rfc=7230 |title=Hypertext Transfer Protocol (HTTP/1.1): Message Syntax and Routing |section=3.2.4 |sectionname=Field Parsing}}</ref> in the past, long lines could be split into multiple lines with a continuation line starting with a [[Space (punctuation)|space]] or [[tab character|tab]] character.
+
+===Request{{anchor |Request_message}}===
+A request is sent by a client to a server. The start line includes a method name, a request URI and the protocol version with a single space between each field.<ref>{{cite IETF |rfc=9112 |sectionname=Message format |section=2.1 |title=RFC 9112: HTTP/1.1}}</ref> The following request start line specifies method {{code |GET}}, URI {{code |/customer/123}} and protocol version {{code |HTTP/1.1}}:
+
+ GET /customer/123 HTTP/1.1
+
+[[List of HTTP header fields#Request fields|Request header fields]] allow the client to pass additional information beyond the request line, acting as request modifiers (similarly to the parameters of a procedure). They give information about the client, about the target resource, or about the expected handling of the request. In the HTTP/1.1 protocol, all header fields except <code>Host</code> are optional.
+
+A request line containing only the path name is accepted by servers to maintain compatibility with HTTP clients before the HTTP/1.0 specification in {{IETF RFC|1945}}.<ref>{{cite web |title=Apache Week. HTTP/1.1 |url=https://www.apacheweek.com/features/http11 |access-date=2021-05-03 |archive-date=2021-06-02 |archive-url=https://web.archive.org/web/20210602213136/http://www.apacheweek.com/features/http11 }} 090502 apacheweek.com</ref>
+
+====Resource{{anchor |request-resource}}====
+The protocol structures transaction as operating on resources. What a resource represents, whether pre-existing data or data that is generated dynamically, depends on the implementation of the server. Often, the resource corresponds to a file or the output of an executable running on the server.
+
+====Method{{anchor|request-method|Request_methods}}====
+A request identifies a method (sometimes informally called ''verb'') to classify the desired action to be performed on a resource. The HTTP/1.0 specification{{Ref RFC|1945|rsection=8}} defined the GET, HEAD, and POST methods as well as listing the PUT, DELETE, LINK and UNLINK methods under additional methods. However, the HTTP/1.1 specification{{Ref RFC|2616|rsection=9}} added five new methods: PUT, DELETE, CONNECT, OPTIONS, and TRACE. Any client can use any method and the server can be configured to support any combination of methods. If a method is unknown to an intermediate, it will be treated as an unsafe and [[idempotence|non-idempotent]] method. There is no limit to the number of methods that can be defined, which allows for future methods to be specified without breaking existing infrastructure. For example, [[WebDAV]] defined seven new methods and {{IETF RFC|5789}} specified the [[PATCH (HTTP)|PATCH]] method. A general-purpose web server is required to implement at least GET and HEAD, and all other methods are considered optional by the specification.{{Ref RFC|9110|rsection=9.1}}
+
+Method names are case sensitive.{{Ref RFC|9112|rsection=3}}{{Ref RFC|9110|rsection=9.1}} This is in contrast to HTTP header field names which are case-insensitive.{{Ref RFC|9110|rsection=6.3}}
+
+{{anchor |GET method}}
+; GET: The request is for a representation of a resource. The server should only [[Data retrieval|retrieve data]]; not modify state.<ref name="Internet Engineering Task Force-2022"/> For retrieving without making changes, GET is preferred over POST, as it can be [[addressability|addressed]] through a [[URL]].{{clarify|how is GET addressable via a URL but POST is not?|date=November 2025}} This enables bookmarking and sharing and makes GET responses eligible for [[browser cache|caching]], which can save bandwidth. The [[W3C]] has published guidance principles on this distinction, saying, "[[Web application]] design should be informed by the above principles, but also by the relevant limitations."<ref>{{cite web |last=Jacobs |first=Ian |title=URIs, Addressability, and the use of HTTP GET and POST |url=https://www.w3.org/2001/tag/doc/whenToUseGet.html#checklist |work=Technical Architecture Group finding |publisher=W3C |access-date=26 September 2010 |year=2004}}</ref>
+
+{{anchor |HEAD method}}
+; HEAD: The request is like a GET except that the response should ''not'' include the representation data in the body. This is useful for retrieving the representation [[metadata]] in the response header, without having to transfer the entire representation. Uses include checking whether a page is available via the status code and getting the size of a [[computer file|file]] via header field <code>Content-Length</code>.
+
+{{anchor |POST method}}
+; [[POST (HTTP)|POST]]: The request is to process a resource in some way. For example, it is used for posting a message to an [[Internet forum]], subscribing to a [[mailing list]], or completing an [[online shopping]] transaction.{{Ref RFC|9110|rsection=9.3.3}}
+
+{{anchor |PUT method}}
+; PUT: The request is to create or update a resource with the state in the request. A distinction from POST is that the client specifies the target location on the server.{{Ref RFC|9110|rsection=9.3.4}}
+
+{{anchor |DELETE method}}
+; DELETE: The request is to delete a resource.
+
+{{anchor |CONNECT method}}
+; CONNECT: Requests that the intermediary establish a [[tunneling protocol|TCP/IP tunnel]] to the origin server identified by the request target. It is often used to secure connections through one or more [[HTTP proxy|HTTP proxies]] with [[Transport Layer Security|TLS]].{{Ref RFC|9110|rsection=9.3.6}}<ref>{{cite web |url=https://www.kb.cert.org/vuls/id/150227 |title=Vulnerability Note VU#150227: HTTP proxy default configurations allow arbitrary TCP connections |access-date=2007-05-10 |date=2002-05-17 |publisher=[[CERT Coordination Center|US-CERT]]}}</ref> See [[HTTP tunnel#HTTP CONNECT method|HTTP CONNECT method]].
+
+{{anchor |OPTIONS method}}
+; OPTIONS: Request is for a report of the HTTP methods that are supported for a resource. This can be used to check the functionality of a web server by requesting '*' instead of a specific resource.
+
+{{anchor |TRACE method}}
+; TRACE: Requests the server to respond with the received request in the response body. That way a client can see what (if any) changes or additions have been made by intermediaries. Useful for debugging.
+
+{{anchor |PATCH method}}
+; [[PATCH (HTTP)|PATCH]]: The request is to modify a resource according to its partial state in the request. Compared to PUT, this can save bandwidth by sending only part of a resource's representation instead of all of it.{{Ref RFC|5789}}
+
+{{anchor|Properties of request methods table}}
+{| class="wikitable sortable" style="text-align: center; width: auto; table-layout: fixed;"
+|+Properties of request methods
+|-
+!scope="col"| Method
+!scope="col"| RFC
+!scope="col"| Request has <br> payload body
+!scope="col"| Response has <br> payload body
+!scope="col"| Safe
+!scope="col"| Idempotent
+!scope="col"| Cacheable
+|-
+!scope="row"| GET
+| {{IETF RFC|9110}}
+| {{Optional}}
+| {{Yes}}
+| {{Yes}}
+| {{Yes}}
+| {{Yes}}
+|-
+!scope="row"| HEAD
+| {{IETF RFC|9110}}
+| {{Optional}}
+| {{No}}
+| {{Yes}}
+| {{Yes}}
+| {{Yes}}
+|-
+!scope="row"| POST
+| {{IETF RFC|9110}}
+| {{Yes}}
+| {{Yes}}
+| {{No}}
+| {{No}}
+| {{Yes}}
+|-
+!scope="row"| PUT
+| {{IETF RFC|9110}}
+| {{Yes}}
+| {{Yes}}
+| {{No}}
+| {{Yes}}
+| {{No}}
+|-
+!scope="row"| DELETE
+| {{IETF RFC|9110}}
+| {{Optional}}
+| {{Yes}}
+| {{No}}
+| {{Yes}}
+| {{No}}
+|-
+!scope="row"| CONNECT
+| {{IETF RFC|9110}}
+| {{Optional}}
+| {{Yes}}
+| {{No}}
+| {{No}}
+| {{No}}
+|-
+!scope="row"| OPTIONS
+| {{IETF RFC|9110}}
+| {{Optional}}
+| {{Yes}}
+| {{Yes}}
+| {{Yes}}
+| {{No}}
+|-
+!scope="row"| TRACE
+| {{IETF RFC|9110}}
+| {{No}}
+| {{Yes}}
+| {{Yes}}
+| {{Yes}}
+| {{No}}
+|-
+!scope="row"| PATCH
+| {{IETF RFC|5789}}
+| {{Yes}}
+| {{Yes}}
+| {{No}}
+| {{No}}
+| {{No}}
+|}
+
+=====Safe method=====
+A request method is ''safe'' if a request with that method has no intended effect on the server. The methods GET, HEAD, OPTIONS, and TRACE are defined as safe. In other words, safe methods are intended to be [[Command–query separation|read-only]]. Safe methods can still have [[Side effect (computer science)|side effects]] not seen by the client, such as appending request information to a [[Server log|log file]] or charging an [[Web banner|advertising account]].
+
+In contrast, the methods POST, PUT, DELETE, CONNECT, and PATCH are not safe. They may modify the state of the server or have other effects such as sending an [[email]]. Such methods are therefore not usually used by conforming [[Internet bot|web robots]] or web crawlers; some that do not conform tend to make requests without regard to context or consequences.
+
+Despite the prescribed safety of GET requests, in practice their handling by the server is not technically limited in any way. Careless or deliberately irregular programming can allow GET requests to cause non-trivial changes on the server. This is discouraged because of the problems which can occur when [[web caching]], [[List of search engine software|search engines]], and other automated agents make unintended changes on the server. For example, a website might allow deletion of a resource through a URL such as ''<nowiki>https://example.com/article/1234/delete</nowiki>'', which, if arbitrarily fetched, even using GET, would simply delete the article.<ref name="Ediger-2007">{{cite book |last=Ediger |first=Brad |date=2007-12-21 |title=Advanced Rails: Building Industrial-Strength Web Apps in Record Time |url=https://shop.oreilly.com/product/9780596510329.do |publisher=O'Reilly Media, Inc. |page=188 |isbn= 978-0-596-51972-8 |quote=A common mistake is to use GET for an action that updates a resource. [...] This problem came into the Rails public eye in 2005, when the Google Web Accelerator was released.}}</ref> A properly coded website would require a DELETE or POST method for this action, which non-malicious bots would not make.
+
+One example of this occurring in practice was during the short-lived [[Google Web Accelerator]] beta, which prefetched arbitrary URLs on the page a user was viewing, causing records to be automatically altered or deleted ''en masse''. The beta was suspended only weeks after its first release, following widespread criticism.<ref>{{cite web |url=https://blogs.adobe.com/cantrell/archives/2005/06/what_have_we_le.html |title=What Have We Learned From the Google Web Accelerator? |last=Cantrell |first=Christian |archive-url=https://web.archive.org/web/20170819161233/https://blogs.adobe.com/cantrell/archives/2005/06/what_have_we_le.html |archive-date=2017-08-19 |date=2005-06-01 |website=Adobe Blogs |publisher=Adobe |access-date=2018-11-19 }}</ref>
+
+=====Idempotent method=====
+{{see also|Idempotence#Computer science meaning}}
+A request method is ''idempotent'' if multiple identical requests with that method have the same effect as a single such request. The methods PUT and DELETE, and safe methods are defined as idempotent. Safe methods are trivially idempotent, since they are intended to have no effect on the server whatsoever; the PUT and DELETE methods, meanwhile, are idempotent since successive identical requests will be ignored. A website might, for instance, set up a PUT endpoint to modify a user's recorded email address. If this endpoint is configured correctly, any requests which ask to change a user's email address to the same email address which is already recorded—e.g. duplicate requests following a successful request—will have no effect. Similarly, a request to DELETE a certain user will have no effect if that user has already been deleted.
+
+In contrast, the methods POST, CONNECT, and PATCH are not necessarily idempotent, and therefore sending an identical POST request multiple times may further modify the state of the server or have further effects, such as sending multiple [[email]]s. In some cases this is the desired effect, but in other cases it may occur accidentally. A user might, for example, inadvertently send multiple POST requests by clicking a button again if they were not given clear feedback that the first click was being processed. While [[web browser]]s may show [[alert dialog box]]es to warn users in some cases where reloading a page may re-submit a POST request, it is generally up to the web application to handle cases where a POST request should not be submitted more than once.
+
+Note that whether or not a method is idempotent is not enforced by the protocol or web server. It is perfectly possible to write a web application in which (for example) a database insert or other non-idempotent action is triggered by a GET or other request. To do so against recommendations, however, may result in undesirable consequences, if a user agent assumes that repeating the same request is safe when it is not.
+
+=====Cacheable method=====
+{{see also|Web cache}}
+
+A request method is ''cacheable'' if responses to requests with that method may be stored for future reuse. The methods GET, HEAD, and POST are defined as cacheable.
+
+In contrast, the methods PUT, DELETE, CONNECT, OPTIONS, TRACE, and PATCH are not cacheable.
+
+===Response <span class="anchor" id="Response_message"></span>===
+A response is sent to the client by the server. The start line of a response consists of the protocol version, a status code and optionally a reason phrase with fields separated by a single space character. {{Ref RFC|9112|rsection=2.1}} The following response start line specifies protocol version {{code |HTTP/1.1}}, status code {{code|400}} and reason phrase {{code |Bad Request}}.
+
+ HTTP/1.1 400 Bad Request
+
+[[List of HTTP header fields#Response fields|Response header fields]] allow the server to pass additional information beyond the status line, acting as response modifiers. They give information about the server or about further access to the target resource or related resources. Each response header field has a defined meaning which can be further refined by the semantics of the request method or response status code.
+
+====Status code{{anchor |response-status-code}}====
+{{See also|List of HTTP status codes}}
+The status code is a three-digit, decimal, integer value that represents the disposition of the server's attempt to satisfy the client's request. Generally, a client handles a response primarily based on the status code and secondarily on response header fields. A client may not understand each status code that a server reports but it must understand the class as indicated by the first digit and treat an unrecognized code as equivalent to the x00 code of that class. The classes are as follows:
+
+; 1XX informational: The request was received, continuing process.
+; 2XX successful: The request was successfully received, understood, and accepted.
+; 3XX redirection: Further action needs to be taken in order to complete the request.
+; 4XX client error: The request cannot be fulfilled due to an issue that the client might be able to control.
+; 5XX server error: The server failed to fulfill an apparently valid request.
+
+====Reason phrase{{anchor |response-reason-phrase}}====
+The standard reason phrases are only recommendations. A web server is allowed to use a localized equivalent. If a status code indicates a problem, the user agent might display the reason phrase to the user to provide further information about the nature of the problem. The standard also allows the user agent to attempt to interpret the reason phrase, though this might be unwise since the standard explicitly specifies that status codes are machine-readable and reason phrases are [[human-readable]].
+
+===Example===
+The following demonstrates an HTTP/1.1 request-response transaction for a server at [[example.com|www.example.com]], port 80. HTTP/1.0 would use the same messages except for a few missing headers. HTTP/2 and HTTP/3 would use the same request-response mechanism but with different representations for HTTP headers.
+
+The following is a request with no body. It consists of a start line, 6 header fields and a blank line {{endash}} each terminated with a [[carriage return]] and [[line feed]] sequence. The <code>Host</code> header field distinguishes between various [[Domain Name System|DNS]] names sharing a single [[IP address]], allowing name-based [[virtual hosting]]. While optional in HTTP/1.0, it is mandatory in HTTP/1.1.
+
+<syntaxhighlight lang="http">
+GET / HTTP/1.1
+Host: www.example.com
+User-Agent: Mozilla/5.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8
+Accept-Language: en-GB,en;q=0.5
+Accept-Encoding: gzip, deflate, br
+Connection: keep-alive
+
+</syntaxhighlight>
+
+Although not clear in the representation above (due to limitations of this wiki), the blank line at the end results in ending in two line terminator sequences. Represented as a stream of characters, a shorted version of above shows this more clearly with <code><CRLF></code> representing a line terminator sequence: <code>GET / HTTP/1.1<CRLF>Host: www.example.com<CRLF><CRLF></code>.
+
+In the following response, the [[HTTP ETag|ETag]] (entity tag) header field is used to determine if a cached version of the requested resource is identical to the current version of the resource on the server. The <code>Content-Type</code> header field specifies the [[Internet media type]] of the data conveyed by the HTTP message, and <code>Content-Length</code> indicates its length in bytes. The HTTP/1.1 [[webserver]] publishes its ability to respond to requests for a byte range of the resource by including <code>Accept-Ranges: bytes</code>. This is useful, if the client needs to have only certain portions<ref>{{cite IETF |draft=draft-ietf-http-range-retrieval-00 |title=Byte Range Retrieval Extension to HTTP |first1=Ari |last1=Luotonen |first2=John |last2=Franks |publisher=IETF |date=February 22, 1996}}</ref> of a resource sent by the server, which is called [[byte serving]]. When <code>Connection: close</code> is sent, it means that the [[web server]] will close the [[Transmission Control Protocol|TCP]] connection immediately after the end of the transfer of this response.{{Ref RFC|9112|rsection=9.1}}
+
+Most of the header fields are optional but some are mandatory. When header <code>Content-Length</code> is missing from a response with a body, then this should be considered an error in HTTP/1.0 but it may not be an error in HTTP/1.1 if header <code>Transfer-Encoding: chunked</code> is present. Chunked transfer encoding uses a chunk size of 0 to mark the end of the content. Some old implementations of HTTP/1.0 omitted the header <code>Content-Length</code> when the length of the body was not known at the beginning of the response and so the transfer of data to client continued until server closed the socket.
+
+<code>Content-Encoding: gzip</code> informs the client that the body is compressed per the [[gzip]] algorithm.
+
+<syntaxhighlight lang="http">
+HTTP/1.1 200 OK
+Date: Mon, 23 May 2005 22:38:34 GMT
+Content-Type: text/html; charset=UTF-8
+Content-Length: 155
+Last-Modified: Wed, 08 Jan 2003 23:11:55 GMT
+Server: Apache/1.3.3.7 (Unix) (Red-Hat/Linux)
+ETag: "3f80f-1b6-3e1cb03b"
+Accept-Ranges: bytes
+Connection: close
+
+<html>
+  <head>
+    <title>An Example Page</title>
+  </head>
+  <body>
+    <p>Hello World, this is a very simple HTML document.</p>
+  </body>
+</html>
+</syntaxhighlight>
+
+== Similar protocols ==
+; [[Gopher (protocol)|Gopher protocol]]: A content delivery protocol that was displaced by HTTP in the early 1990s.
+; [[SPDY]] protocol: An alternative to HTTP developed at [[Google]], superseded by [[HTTP/2]].
+; [[Gemini (protocol)|Gemini protocol]]: A Gopher-inspired protocol which mandates privacy-related features.
+
+== History ==
+[[File:Tim Berners-Lee CP 2.jpg|thumb|[[Tim Berners-Lee]] ]]
+
+[[Tim Berners-Lee]] and his team at [[CERN]] are credited with inventing HTTP, along with HTML and the associated technology for a [[web server]] and a client [[user interface]] called [[web browser]]. Berners-Lee designed HTTP in order to help with the adoption of his other idea: the "WorldWideWeb" project, which was first proposed in 1989, now known as the [[World Wide Web]]. Development of HTTP was initiated in 1989 and summarized in a simple document describing the behavior of a client and a server using the first HTTP version, named 0.9.<ref name="Tim Berner-Lee-1991">{{Cite web|url=https://www.w3.org/pub/WWW/Protocols/HTTP/AsImplemented.html|title=The Original HTTP as defined in 1991|website=www.w3.org|publisher=World Wide Web Consortium|date=1991-01-01|access-date=2010-07-24|language=en|author=Tim Berner-Lee}}</ref> That version was subsequently developed, eventually becoming the public 1.0.<ref name="Tim Berner-Lee-1992">{{Cite web|url=https://www.w3.org/Protocols/HTTP/HTTP2.html|title=Basic HTTP as defined in 1992|website=www.w3.org|publisher=World Wide Web Consortium|year=1992|access-date=2021-10-19|language=en|author=Tim Berner-Lee}}</ref> Development of early HTTP [[Request for Comments]] (RFC) documents started a few years later in a coordinated effort by the [[Internet Engineering Task Force]] (IETF) and the [[World Wide Web Consortium]] (W3C), with work later moving to the IETF.
+
+[[CERN httpd|The first web server]] went live in 1990.<ref>{{Cite web |title=Invention Of The Web, Web History, Who Invented the Web, Tim Berners-Lee, Robert Cailliau, CERN, First Web Server |url=https://www.livinginternet.com/w/wi_lee.htm |access-date=2021-08-11 |website=LivingInternet |language=en-US}}</ref><ref>{{Cite web |last=Berners-Lee| first=Tim| date=1990-10-02| title=daemon.c - TCP/IP based server for HyperText |url=https://www.w3.org/Daemon/old/V0.1/daemon.c |access-date=2021-08-11 |website=www.w3.org}}</ref> The protocol used had only one method, namely GET, which would request a page from a server.<ref>{{cite web |last=Berners-Lee |first=Tim |title=HyperText Transfer Protocol |url=https://www.w3.org/History/19921103-hypertext/hypertext/WWW/Protocols/HTTP.html|publisher=[[World Wide Web Consortium]] |access-date=31 August 2010 }}</ref> The response from the server was always an HTML page.<ref name="Tim Berner-Lee-1991"/>
+
+===HTTP/0.9===
+In 1991, the first documented official version of HTTP was written as a plain document, less than 700 words long, and this version was named HTTP/0.9, which supported only GET method, allowing clients to only retrieve HTML documents from the server, but not supporting any other file formats or information upload.<ref name="Tim Berner-Lee-1991"/>
+
+===HTTP/1.0-draft===
+Since 1992, a new document was written to specify the evolution of the basic protocol towards its next full version. It supported both the simple request method of the 0.9 version and the full GET request that included the client HTTP version. This was the first of the many unofficial HTTP/1.0 drafts that preceded the final work on HTTP/1.0.<ref name="Tim Berner-Lee-1992"/>
+
+===W3C HTTP Working Group===
+After having decided that new features of HTTP protocol were required and that they had to be fully documented as official RFC documents, in early 1995, the HTTP Working Group (HTTP&nbsp;WG, led by [[Dave Raggett]]) was constituted with the aim to standardize and expand the protocol with extended operations, extended negotiation, richer meta-information, tied with a security protocol which became more efficient by adding additional methods and [[List of HTTP header fields|header fields]].<ref>{{Cite web |last=Raggett |first=Dave |title=Dave Raggett's Bio |url=https://www.w3.org/People/Raggett/profile.html|publisher=World Wide Web Consortium |access-date=11 June 2010}}</ref><ref>{{cite web |last1=Raggett |first1=Dave |title=Hypertext Transfer Protocol Working Group |url=https://www.w3.org/Arena/webworld/httpwgcharter.html |publisher=World Wide Web Consortium |access-date=29 September 2010 |first2=Tim |last2=Berners-Lee}}</ref>
+
+The HTTP WG planned to revise and publish new versions of the protocol as HTTP/1.0 and HTTP/1.1 within 1995, but, because of the many revisions, that timeline lasted much more than one year.<ref>{{Cite web |last=Raggett |first=Dave |title=HTTP WG Plans |url=https://www.w3.org/Arena/webworld/httpwgplans.html |publisher=World Wide Web Consortium |access-date=29 September 2010}}</ref>
+
+The HTTP WG planned also to specify a far future version of HTTP called HTTP-NG (HTTP Next Generation) that would have solved all remaining problems, of previous versions, related to performances, low latency responses, etc. but this work started only a few years later and it was never completed.
+
+===HTTP/1.0===
+In May 1996, {{Sum RFC|1945|title=no|ref=yes}} was published as a final HTTP/1.0 revision of what had been used in previous 4 years as a pre-standard HTTP/1.0-draft which was already used by many web browsers and web servers.
+
+In early 1996 developers started to even include unofficial extensions of the HTTP/1.0 protocol (i.e. keep-alive connections, etc.) into their products by using drafts of the upcoming HTTP/1.1 specifications.<ref name="Sailu Reddy-2002"/>
+
+===HTTP/1.1===
+Since early 1996, major web browsers and web server developers also started to implement new features specified by pre-standard HTTP/1.1 drafts specifications.  End-user adoption of the new versions of browsers and servers was rapid. In March 1996, one web hosting company reported that over 40% of browsers in use on the Internet used the new HTTP/1.1 header "Host" to enable [[virtual hosting]], and that by June 1996, 65% of all browsers accessing their servers were pre-standard HTTP/1.1 compliant.<ref>{{Cite web |title=HTTP 1.1 Compliant Browsers |url=https://www.webcom.com/glossary/http1.1.shtml |archive-url=https://web.archive.org/web/19980204144926/http://www.webcom.com/glossary/http1.1.shtml |archive-date=1998-02-04 |access-date=2009-05-29 |work=webcom.com}}</ref>
+
+In January 1997, {{Sum RFC|2068|title=no|ref=yes}} was officially released as HTTP/1.1 specifications.
+
+In June 1999, {{Sum RFC|2616|title=no|ref=yes}} was released to include all improvements and updates based on previous (obsolete) HTTP/1.1 specifications.
+
+===W3C HTTP-NG Working Group===
+Resuming the old 1995 plan of previous HTTP Working Group, in 1997 an ''HTTP-NG Working Group'' was formed to develop a new HTTP protocol named HTTP-NG (HTTP New Generation).  A few proposals / drafts were produced for the new protocol to use [[multiplexing]] of HTTP transactions inside a single TCP/IP connection, but in 1999, the group stopped its activity passing the technical problems to IETF.<ref>{{Cite web|url=https://www.w3.org/Protocols/HTTP-NG/|title=HTTP-NG Working Group|website=www.w3.org|publisher=World Wide Web Consortium|year=1997|access-date=2021-10-19|language=en|author=}}</ref>
+
+===IETF HTTP Working Group restarted===
+In 2007, the IETF [https://httpwg.org/ HTTP Working Group] (HTTP WG bis or HTTPbis) was restarted firstly to revise and clarify previous HTTP/1.1 specifications and secondly to write and refine future HTTP/2 specifications (named httpbis).<ref>{{Cite web|url=https://httpwg.org/|title=HTTP Working Group|website=httpwg.org|publisher=IETF|year=2007|access-date=2021-10-19|language=en|author=Web Administrator}}</ref><ref>{{Cite web|url=https://datatracker.ietf.org/wg/httpbis/charter/|title=HTTP Working Group: charter httpbis|website=datatracker.ietf.org|publisher=IETF|year=2007|access-date=2021-10-19|language=en|author=Web Administrator}}</ref>
+
+===SPDY===
+In 2009, [[Google]] announced [[SPDY]] {{endash}} a binary protocol they developed to speed up web traffic between browsers and servers. In many tests, using SPDY was indeed faster than using HTTP/1.1. SPDY was integrated into Google's [[Chromium (web browser)|Chromium]] and then into other major web browsers.<ref>{{Cite web|url=http://dev.chromium.org/spdy/spdy-whitepaper|title=SPDY: An experimental protocol for a faster web|website=dev.chromium.org|publisher=Google|date=2009-11-01|access-date=2021-10-19|language=en|author=}}</ref> Some of the ideas about multiplexing HTTP streams over a single TCP connection were taken from various sources, including the work of W3C HTTP-NG Working Group.
+
+===HTTP/2===
+In 2012, HTTP Working Group (HTTPbis) announced the need for a new protocol; initially considering aspects of SPDY<ref>{{Cite web|url=https://lists.w3.org/Archives/Public/ietf-http-wg/2012JanMar/0098.html|title=Rechartering httpbis|publisher=IETF; HTTP WG|date=2012-01-24|access-date=2021-10-19|language=en|author=}}</ref><ref>{{Cite web|url=https://lists.w3.org/Archives/Public/ietf-http-wg/2012JanMar/0902.html|title=WG Action: RECHARTER: Hypertext Transfer Protocol Bis (httpbis)|publisher=IETF; HTTP WG|date=2012-03-19|access-date=2021-10-19|language=en|author=IESG Secretary}}</ref> and eventually deciding to derive the new protocol from SPDY.<ref>{{Cite web|url=https://developers.google.com/web/fundamentals/performance/http2|title=High Performance Browser Networking: Introduction to HTTP/2|website=developers.google.com|publisher=Google Inc.|date=2019-09-03|access-date=2021-10-19|language=en|author1=Ilya Grigorik|author2=Surma}}</ref> In May 2015, [[HTTP/2]] was published as {{Sum RFC|7540|title=no|ref=yes}}. The protocol was quickly adopted by web browsers already supporting SPDY and more slowly by web servers.
+
+===2014 updates to HTTP/1.1===
+In June 2014, the HTTP Working Group released an updated six-part HTTP/1.1 specification obsoleting {{Sum RFC|2616|title=no|ref=yes}}:
+* {{Sum RFC|7230|ref=yes}}
+* {{Sum RFC|7231|ref=yes}}
+* {{Sum RFC|7232|ref=yes}}
+* {{Sum RFC|7233|ref=yes}}
+* {{Sum RFC|7234|ref=yes}}
+* {{Sum RFC|7235|ref=yes}}
+
+===HTTP/0.9 Deprecation===
+In 2014, HTTP/0.9 was deprecated for servers supporting version HTTP/1.1 (and higher):{{Ref RFC|7230|rsection=Appendix A}}{{Blockquote |text=Since HTTP/0.9 did not support header fields in a request, there is no mechanism for it to support name-based virtual hosts (selection of resource by inspection of the Host header field).  '''Any server that implements name-based virtual hosts ought to disable support for HTTP/0.9'''.  Most requests that appear to be HTTP/0.9 are, in fact, badly constructed HTTP/1.x requests caused by a client failing to properly encode the request-target.
+|multiline=yes |style=font-style: italic;}}
+
+Since 2016 many product managers and developers of user agents (browsers, etc.) and web servers have begun planning to gradually deprecate and dismiss support for HTTP/0.9 protocol, mainly for the following reasons:<ref>{{Cite web|url=https://groups.google.com/a/chromium.org/g/blink-dev/c/OdKnpLlvVUo/m/1EpFGVUjAwAJ|title=Intent to Deprecate and Remove: HTTP/0.9 Support|website=groups.google.com|date=2016-06-30|access-date=2021-10-15|language=en|author=Matt Menke}}</ref>
+* it is so simple that an RFC document was never written (there is only the original document);<ref name="Tim Berner-Lee-1991"/>
+* it has no HTTP headers and lacks many other features that nowadays are required for minimal security reasons;
+* it has not been widespread since 1999..2000 (because of HTTP/1.0 and HTTP/1.1) and is commonly used only by some very old network hardware, i.e. [[Router (computing)|routers]], etc.
+
+As of 2022, HTTP/0.9 support has not been officially, completely deprecated and is still present in many web servers and browsers (for server responses only), even if usually disabled. It is unclear how long it will take to decommission HTTP/0.9.
+
+===HTTP/3===
+In 2020, the first drafts of [[HTTP/3]] were published and major web browsers and web servers started to adopt it. On 6 June 2022, IETF standardized HTTP/3 as {{Sum RFC|9114|title=no|ref=yes}}.
+
+===Updates and refactoring in 2022===
+In June 2022, RFC documents were published that deprecated many of the previous documents and introducing a few minor changes and a refactoring of HTTP semantics description into a separate document.
+* {{Sum RFC|9110|ref=yes}}
+* {{Sum RFC|9111|ref=yes}}
+* {{Sum RFC|9112|ref=yes}}
+* {{Sum RFC|9113|ref=yes}}
+* {{Sum RFC|9114|ref=yes}} (See also the section above.)
+* {{Sum RFC|9204|ref=yes}}
+* {{Sum RFC|9218|ref=yes}}
+
+== See also ==
+* {{Annotated link| Comparison of file transfer protocols}}
+* {{Annotated link| Constrained Application Protocol}}
+* {{Annotated link| Content negotiation}}
+* {{Annotated link| Digest access authentication}}
+* {{Annotated link| InterPlanetary File System}}
+* {{Annotated link| HTTP compression}}
+* {{Annotated link| Representational state transfer}}
+* {{Annotated link| Variant object}}
+* {{Annotated link| Web cache}}
+* {{Annotated link| WebSocket}}
+* {{Annotated link| Wireless Application Protocol}}
+
+== Notes ==
+{{reflist|group=note}}
+
+== References ==
+{{reflist}}
+
+== External links ==
+{{wikibooks|Communication Networks/HTTP Protocol}}
+{{Commons category|Hypertext Transfer Protocol}}
+* {{Official website}}
+* {{github|httpwg|IETF HTTP Working Group}}
+* {{cite web |url=https://www.w3.org/Protocols/History.html |title=Change History for HTTP |publisher=W3.org |access-date=2010-08-01}} A detailed technical history of HTTP.
+* {{cite web |url=https://www.w3.org/Protocols/DesignIssues.html |title=Design Issues for HTTP |publisher=W3.org |access-date=2010-08-01}} Design Issues by Berners-Lee when he was designing the protocol.
+
+{{Web browsers|fsp}}
+{{Semantic Web}}
+{{URI scheme}}
+{{Web interfaces}}
+
+{{Authority control}}
+
+[[Category:Hypertext Transfer Protocol| ]]
+[[Category:Application layer protocols]]
+[[Category:Internet properties established in 1991]]
+[[Category:World Wide Web Consortium standards]]
