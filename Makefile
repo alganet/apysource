@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: ISC
 
-.PHONY: check test coverage lint compile-defaults clean help
+.PHONY: check test coverage lint compile-defaults clean dist publish help
 
 # =============================================================================
 # VERIFICATION
@@ -27,8 +27,14 @@ lint:  ## Run type checking with mypy
 compile-defaults:  ## Regenerate _defaults.py from defaults.toml
 	python -m apywire compile --format toml defaults.toml > apysource/_defaults.py
 
+dist:  ## Build source and wheel distributions
+	python -m build
+
+publish: dist  ## Build and upload to PyPI
+	twine upload dist/*
+
 clean:  ## Remove generated files
-	rm -rf .pytest_cache __pycache__ apysource/__pycache__ .mypy_cache
+	rm -rf .pytest_cache __pycache__ apysource/__pycache__ .mypy_cache dist build *.egg-info
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
