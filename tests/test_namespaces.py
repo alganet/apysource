@@ -13,13 +13,13 @@ from apysource.namespaces import SV, bind_prefixes, new_graph
 
 def test_sv_namespace_uri():
     """SV namespace has the correct base URI."""
-    assert str(SV) == "https://alganet.github.io/apysource#"
+    assert str(SV) == "https://alganet.github.io/apysource/vocab.ttl#"
 
 
 def test_sv_term_expansion():
     """SV terms expand to the correct full URI."""
-    assert str(SV.Source) == "https://alganet.github.io/apysource#Source"
-    assert str(SV.Fragment) == "https://alganet.github.io/apysource#Fragment"
+    assert str(SV.Source) == "https://alganet.github.io/apysource/vocab.ttl#Source"
+    assert str(SV.Fragment) == "https://alganet.github.io/apysource/vocab.ttl#Fragment"
 
 
 # ── bind_prefixes ────────────────────────────────────────────────────────
@@ -30,7 +30,7 @@ def test_bind_prefixes_binds_to_graph():
     bind_prefixes(g)
     namespaces = dict(g.namespaces())
     assert "sv" in namespaces
-    assert str(namespaces["sv"]) == "https://alganet.github.io/apysource#"
+    assert str(namespaces["sv"]) == "https://alganet.github.io/apysource/vocab.ttl#"
 
 
 def test_bind_prefixes_custom():

@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: ISC
 
-.PHONY: check test coverage lint compile-defaults clean dist publish help
+.PHONY: check test coverage lint compile-defaults clean dist publish site help
 
 # =============================================================================
 # VERIFICATION
@@ -33,8 +33,13 @@ dist:  ## Build source and wheel distributions
 publish: dist  ## Build and upload to PyPI
 	twine upload dist/*
 
+site:  ## Assemble GitHub Pages site into _site/
+	mkdir -p _site
+	cp vocab/vocab.ttl vocab/shapes.ttl vocab/index.html _site/
+	pylode vocab/vocab.ttl -o _site/vocab.html
+
 clean:  ## Remove generated files
-	rm -rf .pytest_cache __pycache__ apysource/__pycache__ .mypy_cache dist build *.egg-info
+	rm -rf .pytest_cache __pycache__ apysource/__pycache__ .mypy_cache dist build *.egg-info _site
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'

@@ -16,11 +16,11 @@ VOCAB_DIR = Path(__file__).resolve().parent.parent / "vocab"
 # ── load_triples ────────────────────────────────────────────────────────
 
 def test_load_triples_loads_ttl():
-    """load_triples loads the vocab/apysource.ttl file successfully."""
+    """load_triples loads the vocab/vocab.ttl file successfully."""
     g = load_triples(VOCAB_DIR)
     assert len(g) > 0
     # Should contain sv:Source class
-    assert any("apysource#Source" in str(s) for s in g.subjects())
+    assert any("apysource/vocab.ttl#Source" in str(s) for s in g.subjects())
 
 
 # ── load_triples_split ──────────────────────────────────────────────────
@@ -38,7 +38,7 @@ def test_load_triples_split_returns_graphs():
 
 def test_local_name_extracts_fragment():
     """local_name extracts the local name after # from a URI."""
-    uri = URIRef("https://alganet.github.io/apysource#Source")
+    uri = URIRef("https://alganet.github.io/apysource/vocab.ttl#Source")
     assert local_name(uri) == "Source"
 
 

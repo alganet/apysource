@@ -7,7 +7,7 @@
 from rdflib import Graph, Namespace
 from rdflib.namespace import DCTERMS, OWL, PROV, RDF, RDFS, SKOS, XSD
 
-SV = Namespace("https://alganet.github.io/apysource#")
+SV = Namespace("https://alganet.github.io/apysource/vocab.ttl#")
 
 OA = Namespace("http://www.w3.org/ns/oa#")
 BIBO = Namespace("http://purl.org/ontology/bibo/")

@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: ISC
 
-@prefix sv:      <https://alganet.github.io/apysource#> .
+@prefix sv:      <https://alganet.github.io/apysource/vocab.ttl#> .
 @prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix oa:      <http://www.w3.org/ns/oa#> .
