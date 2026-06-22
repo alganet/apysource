@@ -10,9 +10,8 @@ All paths are received as parameters from callers.
 
 from pathlib import Path
 
-from rdflib import Graph, URIRef
+from rdflib import Graph
 
-from apysource.namespaces import SV
 
 
 def load_triples(
@@ -25,12 +24,15 @@ def load_triples(
     """Load all .ttl files from a directory into a single Graph."""
     g = Graph()
     for f in sorted(rdf_dir.rglob("*.ttl")):
-        name = str(f)
+        # Classify by the file name only — matching the full path would
+        # misclassify every file when a parent directory happens to contain
+        # "shapes" or "inferred" (e.g. a project dir named "my-shapes").
+        name = f.name
         if not include_shapes and "shapes" in name:
             continue
         if not include_inferred and "inferred" in name:
             continue
-        if not include_semantic and f.name.endswith("-semantic.ttl"):
+        if not include_semantic and name.endswith("-semantic.ttl"):
             continue
         g.parse(str(f), format="turtle")
     return g
@@ -45,9 +47,10 @@ def load_triples_split(
     errors = []
 
     for f in sorted(rdf_dir.rglob("*.ttl")):
-        if "inferred" in str(f):
+        # Classify by file name only (see load_triples).
+        if "inferred" in f.name:
             continue
-        target = shapes if "shapes" in str(f) else g
+        target = shapes if "shapes" in f.name else g
         try:
             target.parse(str(f), format="turtle")
         except Exception as e:

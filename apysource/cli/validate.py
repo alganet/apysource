@@ -11,10 +11,17 @@ from apysource.graph import load_triples_split
 
 
 class ValidateCommand:
+    """Parse every ``.ttl`` file under the RDF root and optionally SHACL-validate.
+
+    Exits non-zero on a parse error or a SHACL conformance failure; SHACL is
+    skipped (not failed) when ``pyshacl`` is not installed.
+    """
+
     def __init__(self, ctx: CLIContext):
         self.ctx = ctx
 
     def run(self, args: list[str] | None = None) -> None:
+        """Parse and validate all Turtle files; exit 1 on any failure."""
         rdf_root = self.ctx.rdf_root
 
         print("=" * 60)

@@ -6,11 +6,10 @@
 
 import pytest
 from pathlib import Path
-from rdflib import Literal, URIRef
 from rdflib.namespace import DCTERMS, RDF, RDFS
 
 from apysource.namespaces import OA, SCHEMA, SV
-from apysource.resolution import _get_snippet, _get_source, _get_selector_value
+from apysource.resolution import _get_source, _get_selector_value
 from apysource.yaml_input import load_yaml, _slugify, _make_uri
 
 
@@ -153,6 +152,28 @@ def test_load_part_of(tmp_path):
     sources = sorted(g.subjects(RDF.type, SV.Source), key=str)
     assert len(sources) == 2
 
+    ch1 = [s for s in sources if str(g.value(s, RDFS.label)) == "Chapter 1"][0]
+    parent = g.value(ch1, DCTERMS.isPartOf)
+    assert parent is not None
+    assert str(g.value(parent, RDFS.label)) == "The Book"
+
+
+PART_OF_FORWARD_YAML = """\
+sources:
+  - label: "Chapter 1"
+    url: "https://example.com/book/ch1"
+    part_of: "The Book"
+  - label: "The Book"
+    url: "https://example.com/book"
+    type: html
+"""
+
+
+def test_load_part_of_forward_reference(tmp_path):
+    """part_of resolves even when the parent is defined later in the file."""
+    g = load_yaml(_write_yaml(tmp_path, PART_OF_FORWARD_YAML))
+
+    sources = list(g.subjects(RDF.type, SV.Source))
     ch1 = [s for s in sources if str(g.value(s, RDFS.label)) == "Chapter 1"][0]
     parent = g.value(ch1, DCTERMS.isPartOf)
     assert parent is not None

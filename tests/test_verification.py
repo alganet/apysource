@@ -7,35 +7,22 @@
 from unittest.mock import patch
 
 from rdflib import BNode, Graph, Literal, URIRef
-from rdflib.namespace import PROV, RDF, RDFS, XSD
+from rdflib.namespace import PROV, RDF
 
 from apysource.namespaces import OA, SCHEMA, SV
-from apysource.results import CheckResult, Failure, RepoResult, ResolveResult
+from apysource.results import CheckResult, Failure, RepoResult
 from apysource.verification import print_report, run_checks, strip_headers
 
-from tests.conftest import EMPTY_REGISTRY
+from tests.conftest import EMPTY_REGISTRY, build_chain_graph
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 def _make_chain_graph():
     """Build a graph with one Fragment for chain-mode testing (OA-native)."""
-    g = Graph()
     frag = URIRef("http://example.com/data/test#frag1")
     source = URIRef("http://example.com/data/test#src1")
-    g.add((frag, RDF.type, SV.Fragment))
-    g.add((frag, RDFS.label, Literal("test fragment")))
-    g.add((frag, SV.sourceLocation, Literal("lines:1-5")))
-
-    # OA target chain
-    target = BNode()
-    g.add((frag, OA.hasTarget, target))
-    g.add((target, RDF.type, OA.SpecificResource))
-    g.add((target, OA.hasSource, source))
-
-    g.add((source, RDF.type, SV.Source))
-    g.add((source, RDFS.label, Literal("test source")))
-    g.add((source, SCHEMA.url, Literal("http://example.com/item")))
+    g = build_chain_graph(frag, source, "http://example.com/item")
     return g, frag
 
 
@@ -154,6 +141,76 @@ def test_direct_mode_resolvable():
 
     assert len(results) == 1
     check = results[0]
+    assert check.ok == 1
+    assert check.failures == []
+
+
+# ── snippet matching ─────────────────────────────────────────────────────
+
+def _chain_graph_with_snippet(snippet_text):
+    """Chain-mode graph carrying a TextQuoteSelector snippet."""
+    g, frag = _make_chain_graph()
+    target = g.value(frag, OA.hasTarget)
+    tqs = BNode()
+    g.add((target, OA.hasSelector, tqs))
+    g.add((tqs, RDF.type, OA.TextQuoteSelector))
+    g.add((tqs, OA.exact, Literal(snippet_text)))
+    return g, frag
+
+
+def _run_snippet_check(snippet_text, source_text):
+    """Run chain checks and return the 'snippet verified' CheckResult."""
+    g, frag = _chain_graph_with_snippet(snippet_text)
+    resolved = RepoResult(
+        status="resolved", label="test", location="lines:1-5",
+        source="test source", url="http://example.com", module="test",
+        cache_file="/tmp/fake.txt",
+    )
+    checks_config = [{"name": "F", "class_uri": SV.Fragment, "mode": "chain"}]
+    with patch("apysource.verification.resolve_chain", return_value=resolved), \
+         patch("apysource.verification.get_text", return_value=source_text):
+        results = run_checks(g, checks_config, EMPTY_REGISTRY)
+    return next(c for c in results if "snippet verified" in c.name)
+
+
+def test_snippet_full_match_passes():
+    """A long snippet present in full in the source passes."""
+    snippet = "the quick brown fox jumps over the lazy dog every single morning"
+    source = "Prologue. " + snippet + " The end."
+    check = _run_snippet_check(snippet, source)
+    assert check.ok == 1
+    assert check.failures == []
+
+
+def test_snippet_prefix_match_fails():
+    """A snippet whose first 80 chars match but whose tail diverges must FAIL.
+
+    Regression for the old `norm_snippet[:80] in norm_source` truncation.
+    """
+    prefix = ("the quick brown fox jumps over the lazy dog and then keeps on "
+              "running far across the wide green field")
+    assert len(prefix) > 80
+    snippet = prefix + " to the WRONG ending that is not in the source at all"
+    source = "Prologue. " + prefix + " to a completely different and correct ending."
+    check = _run_snippet_check(snippet, source)
+    assert check.ok == 0
+    assert len(check.failures) == 1
+
+
+def test_snippet_trailing_ellipsis_is_prefix_match():
+    """A snippet ending in '...' matches the retained prefix only."""
+    snippet = "the quick brown fox jumps over the lazy dog and then..."
+    source = "the quick brown fox jumps over the lazy dog and then ran off elsewhere"
+    check = _run_snippet_check(snippet, source)
+    assert check.ok == 1
+    assert check.failures == []
+
+
+def test_snippet_unicode_ellipsis_is_prefix_match():
+    """A snippet ending in the Unicode ellipsis '…' behaves like '...'."""
+    snippet = "the quick brown fox jumps over the lazy dog and then…"
+    source = "the quick brown fox jumps over the lazy dog and then ran off elsewhere"
+    check = _run_snippet_check(snippet, source)
     assert check.ok == 1
     assert check.failures == []
 

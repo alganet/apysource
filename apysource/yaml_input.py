@@ -120,16 +120,21 @@ def load_yaml(path: Path) -> Graph:
     g = new_graph()
     sources_by_label: dict[str, URIRef] = {}
 
+    # Pre-pass: register every source URI up front so that `part_of` can
+    # reference a source defined *later* in the file (forward references).
     for source_def in data["sources"]:
         label = source_def.get("label")
         if not label:
             raise ValueError("Each source must have a 'label'")
+        sources_by_label[label] = _make_uri(label, "source")
+
+    for source_def in data["sources"]:
+        label = source_def["label"]
         url = source_def.get("url")
         if not url:
             raise ValueError(f"Source '{label}' must have a 'url'")
 
-        source_uri = _make_uri(label, "source")
-        sources_by_label[label] = source_uri
+        source_uri = sources_by_label[label]
 
         g.add((source_uri, RDF.type, SV.Source))
         g.add((source_uri, RDFS.label, Literal(label)))

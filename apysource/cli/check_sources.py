@@ -9,7 +9,7 @@ from pathlib import Path
 
 from rdflib import Graph
 
-from apysource.cli._base import CLIContext
+from apysource.cli._base import CLIContext, pop_flag
 from apysource.graph import load_triples
 from apysource.http import CachedFetcher
 from apysource.namespaces import SV
@@ -18,14 +18,31 @@ from apysource.verification import print_report, run_checks
 
 
 class CheckSourcesCommand:
-    def __init__(self, ctx: CLIContext, registry: RepoRegistry, fetcher: CachedFetcher | None = None) -> None:
+    """Verify all configured checks against a sources graph.
+
+    Resolves each fragment/term, extracts its cited content, and confirms the
+    snippet is present, printing a pass/fail report and exiting non-zero on
+    any failure. Accepts ``--refresh`` (re-fetch, bypassing the HTTP cache)
+    and ``--provenance <file>`` (write a PROV-O graph).
+    """
+
+    #: Opt in to YAML-graph input: ``check`` may take a sources file as its
+    #: first positional argument (see ``cli.__main__``).
+    accepts_graph = True
+
+    def __init__(self, ctx: CLIContext, registry: RepoRegistry,
+                 fetcher: CachedFetcher | None = None) -> None:
         self.ctx = ctx
         self.registry = registry
         self.fetcher = fetcher
 
     def run(self, graph: Graph | None = None, args: list[str] | None = None) -> None:
+        """Run the configured checks and exit 1 if any fragment fails."""
         if args is None:
             args = []
+
+        # Parse --refresh flag (re-fetch sources, bypassing the HTTP cache)
+        force, args = pop_flag(args, "--refresh")
 
         # Parse --provenance flag
         prov_path = None
@@ -51,7 +68,8 @@ class CheckSourcesCommand:
 
         emit_prov = prov_path is not None
         results = run_checks(g, checks_config, self.registry,
-                             fetcher=self.fetcher, emit_provenance=emit_prov)
+                             fetcher=self.fetcher, emit_provenance=emit_prov,
+                             force=force)
 
         prov_graph = None
         if isinstance(results, tuple):

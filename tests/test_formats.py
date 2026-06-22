@@ -6,7 +6,6 @@
 
 from apysource.formats import (
     HtmlFormat,
-    LocateResult,
     PlainTextFormat,
     detect_format,
     extract_content,

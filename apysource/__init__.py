@@ -3,3 +3,5 @@
 # SPDX-License-Identifier: ISC
 
 """apysource — cache-based source verification for RDF-annotated projects."""
+
+__version__ = "0.3.1"

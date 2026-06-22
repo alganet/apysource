@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: ISC
 
-.PHONY: check test coverage lint compile-defaults clean dist publish site help
+.PHONY: check test coverage lint format compile-defaults clean dist publish site help
 
 # =============================================================================
 # VERIFICATION
@@ -21,8 +21,13 @@ test:  ## Run unit tests
 coverage:  ## Run tests with coverage report (library code only)
 	python -m slipcover --source apysource -m pytest tests/ -q
 
-lint:  ## Run type checking with mypy
+lint:  ## Run ruff (lint) and mypy (type checking)
+	python -m ruff check apysource/ tests/
 	python -m mypy apysource/
+
+format:  ## Auto-format and fix lint issues with ruff
+	python -m ruff format apysource/ tests/
+	python -m ruff check --fix apysource/ tests/
 
 compile-defaults:  ## Regenerate _defaults.py from defaults.toml
 	python -m apywire compile --format toml defaults.toml > apysource/_defaults.py

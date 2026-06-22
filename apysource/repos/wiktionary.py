@@ -126,7 +126,8 @@ class WiktionaryRepo(BaseRepo):
             logger.info("[%s] cached — skipping", term)
             return None
 
-        url = f"{f"{self.base_url}/w/api.php"}?action=parse&page={api_term}&prop=wikitext&format=json"
+        url = (f"{self.base_url}/w/api.php?action=parse"
+               f"&page={api_term}&prop=wikitext&format=json")
         raw = self.http_client.get(url, force=force, from_cache=from_cache,
                                    timeout=15)
         if not raw:

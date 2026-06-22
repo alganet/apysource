@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+
+SPDX-License-Identifier: ISC
+-->
 
 ## Python API
 
@@ -67,38 +72,38 @@ The RDF path requires a TOML config file (`-c`) to wire up the CLI context and r
 
 Standard properties used on sources:
 
-| Property | What it does |
-|---|---|
-| `schema:url` | The URL to fetch |
-| `dcterms:format` | IANA media type (`text/html`, `text/plain`) |
-| `dcterms:title` | Document title |
-| `dcterms:issued` | Publication or access date |
-| `dcterms:language` | Language code (RFC 5646) |
-| `dcterms:publisher` | Publisher name |
-| `dcterms:license` | License URI |
-| `dcterms:isPartOf` | Hierarchical sources (chapter of a book) |
-| `bibo:isbn` | ISBN |
-| `bibo:doi` | DOI |
-| `bibo:pageStart` / `bibo:pageEnd` | Page numbers |
+| Property                          | What it does                                |
+|-----------------------------------|---------------------------------------------|
+| `schema:url`                      | The URL to fetch                            |
+| `dcterms:format`                  | IANA media type (`text/html`, `text/plain`) |
+| `dcterms:title`                   | Document title                              |
+| `dcterms:issued`                  | Publication or access date                  |
+| `dcterms:language`                | Language code (RFC 5646)                    |
+| `dcterms:publisher`               | Publisher name                              |
+| `dcterms:license`                 | License URI                                 |
+| `dcterms:isPartOf`                | Hierarchical sources (chapter of a book)    |
+| `bibo:isbn`                       | ISBN                                        |
+| `bibo:doi`                        | DOI                                         |
+| `bibo:pageStart` / `bibo:pageEnd` | Page numbers                                |
 
 OA properties used on fragments:
 
-| Property | What it does |
-|---|---|
-| `oa:hasTarget` | Links to `oa:SpecificResource` with `oa:hasSource` → Source |
-| `oa:TextQuoteSelector` / `oa:exact` | The snippet text to verify |
-| `oa:CssSelector` / `rdf:value` | CSS selector for HTML extraction |
-| `sv:SectionSelector` / `rdf:value` | Human-readable section path (custom) |
-| `oa:motivatedBy oa:identifying` | Annotation purpose |
+| Property                            | What it does                                                |
+|-------------------------------------|-------------------------------------------------------------|
+| `oa:hasTarget`                      | Links to `oa:SpecificResource` with `oa:hasSource` → Source |
+| `oa:TextQuoteSelector` / `oa:exact` | The snippet text to verify                                  |
+| `oa:CssSelector` / `rdf:value`      | CSS selector for HTML extraction                            |
+| `sv:SectionSelector` / `rdf:value`  | Human-readable section path (custom)                        |
+| `oa:motivatedBy oa:identifying`     | Annotation purpose                                          |
 
 Properties unique to `sv:`:
 
-| Property | What it does |
-|---|---|
-| `sv:sourceLocation` | Opaque repo-specific location (e.g. `chapter:1`) |
-| `sv:sourceLines` | Line range (e.g. `10-20`) |
-| `sv:edition` | Edition or version string |
-| `sv:verificationStatus` | `verified`, `failed`, or `pending` |
+| Property                | What it does                                     |
+|-------------------------|--------------------------------------------------|
+| `sv:sourceLocation`     | Opaque repo-specific location (e.g. `chapter:1`) |
+| `sv:sourceLines`        | Line range (e.g. `10-20`)                        |
+| `sv:edition`            | Edition or version string                        |
+| `sv:verificationStatus` | `verified`, `failed`, or `pending`               |
 
 ### Vocabulary design
 
@@ -116,12 +121,12 @@ The generic path (CSS selectors, line ranges, section selectors) works for most 
 
 ### Built-in repos
 
-| Repo | Handles | Location format |
-|---|---|---|
-| `ArchiveRepo` | archive.org | `lines:N-M` |
-| `GutenbergRepo` | Project Gutenberg | `chapter:N`, title match |
-| `WikisourceRepo` | Wikisource | `section:Name`, subpage match |
-| `WiktionaryRepo` | Wiktionary | term name, `language/section` |
+| Repo             | Handles           | Location format               |
+|------------------|-------------------|-------------------------------|
+| `ArchiveRepo`    | archive.org       | `lines:N-M`                   |
+| `GutenbergRepo`  | Project Gutenberg | `chapter:N`, title match      |
+| `WikisourceRepo` | Wikisource        | `section:Name`, subpage match |
+| `WiktionaryRepo` | Wiktionary        | term name, `language/section` |
 
 All built-in repos are enabled by default. Most URLs work without a specialized repo — the generic fetcher + targetters (section selectors, CSS, line ranges) handle any web page. Repos are for sources that need multi-page crawling or domain-specific extraction. To customize URL patterns or add your own repos, use a TOML config file. See `defaults.toml`.
 
@@ -143,6 +148,26 @@ class MyRepo(BaseRepo):
 ```
 
 `BaseRepo` requires `url_pattern` and `base_url` (from TOML config). `cache_dir` and `http_client` come from the registry. Override `extract_content` for custom extraction logic.
+
+## Caching and freshness
+
+apysource caches every fetched URL on disk (under `data/cache/` by default), keyed by a hash of
+the URL. Cache hits skip both the network and the polite crawl delay, which makes re-runs fast and
+keeps you a courteous crawler.
+
+There is no time-based expiry: **once a URL is cached, that body is reused until you refresh it.**
+For a link-rot checker this is a deliberate trade-off — verification is reproducible, but a source
+that changes upstream won't be noticed until you re-fetch. To force a fresh download, bypassing the
+cache:
+
+```bash
+apysource check sources.yaml --refresh     # re-fetch every source, then verify
+apysource locate <url> <snippet> --refresh # re-fetch this URL while locating
+apysource add sources.yaml <url> <snippet> --refresh
+```
+
+The crawler identifies itself with a `User-Agent` derived from the package version
+(`apysource/<version>`). Set a custom one in a TOML config if needed (see `defaults.toml`).
 
 ## Development
 

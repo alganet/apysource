@@ -15,7 +15,12 @@ from pathlib import Path
 
 import requests
 
+from apysource import __version__
+
 logger = logging.getLogger(__name__)
+
+#: Default crawler identity, derived from the package version so it tracks releases.
+DEFAULT_USER_AGENT = f"apysource/{__version__} (source verification; gentle crawler)"
 
 
 class CachedFetcher:
@@ -25,7 +30,7 @@ class CachedFetcher:
     and the polite delay entirely.
     """
 
-    def __init__(self, cache_dir: Path, user_agent: str = "apysource/1.0",
+    def __init__(self, cache_dir: Path, user_agent: str = DEFAULT_USER_AGENT,
                  default_delay: float = 3.0, default_timeout: int = 30):
         self.cache_dir = Path(cache_dir) if isinstance(cache_dir, str) else cache_dir
         self.user_agent = user_agent
@@ -61,6 +66,12 @@ class CachedFetcher:
     def _fetch(self, url: str, *, force: bool = False, from_cache: bool = False,
                delay: float | None = None, timeout: int | None = None,
                headers: dict | None = None, verify: bool = True) -> bytes | None:
+        """Return cached bytes, or fetch over HTTP and cache them.
+
+        ``force`` deletes any cached copy and re-fetches; ``from_cache`` returns
+        cached bytes only (no network, ``None`` on a miss). On a network error
+        the response is logged and ``None`` is returned without caching.
+        """
         path = self._cache_path(url)
 
         if force and path.exists():

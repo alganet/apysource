@@ -19,7 +19,7 @@ class Compiled:
 
     def http_client(self):
         if not hasattr(self, '_http_client'):
-            self._http_client = apysource.http.CachedFetcher(cache_dir=self.http_cache_dir(), user_agent=self.user_agent(), default_delay=self.default_crawl_delay(), default_timeout=self.default_http_timeout())
+            self._http_client = apysource.http.CachedFetcher(cache_dir=self.http_cache_dir(), default_delay=self.default_crawl_delay(), default_timeout=self.default_http_timeout())
         return self._http_client
 
     def repo_archive(self):
@@ -78,9 +78,6 @@ class Compiled:
 
     def http_cache_dir(self):
         return 'data/cache'
-
-    def user_agent(self):
-        return 'apysource/1.0 (source verification; gentle crawler)'
 
     def default_crawl_delay(self):
         return 3.0
