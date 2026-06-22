@@ -25,7 +25,6 @@ from apysource.formats import (
 )
 from apysource.sections import (
     extract_by_selector,
-    generate_selector,
     locate_section,
 )
 

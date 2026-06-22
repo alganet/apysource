@@ -47,17 +47,24 @@ def main() -> None:
     else:
         from apysource._defaults import compiled as wiring
 
-    # Detect YAML input from remaining args (not for commands that take YAML as output)
+    cmd = getattr(wiring, COMMANDS[name])()
+
+    # A command opts in to YAML-graph input by setting `accepts_graph = True`.
+    # Such a command may take a `.yaml`/`.yml` file as a positional argument
+    # (in any position, e.g. after a flag like `--refresh`); we load it and
+    # pass it through as `graph`. Commands that take a URL/snippet (or no)
+    # positional argument simply don't opt in.
     remaining = args[1:]
     graph = None
-    if (name not in ("add", "locate") and
-            remaining and remaining[0].endswith((".yaml", ".yml"))):
-        from apysource.yaml_input import load_yaml
-        graph = load_yaml(Path(remaining[0]))
-        remaining = remaining[1:]
+    if getattr(cmd, "accepts_graph", False):
+        for i, arg in enumerate(remaining):
+            if arg.endswith((".yaml", ".yml")):
+                from apysource.yaml_input import load_yaml
+                graph = load_yaml(Path(arg))
+                remaining = remaining[:i] + remaining[i + 1:]
+                break
 
-    cmd = getattr(wiring, COMMANDS[name])()
-    if graph is not None and hasattr(cmd, "run"):
+    if graph is not None:
         cmd.run(graph=graph, args=remaining)
     else:
         cmd.run(args=remaining)

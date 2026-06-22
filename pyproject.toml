@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apysource"
-version = "0.3.1"
+dynamic = ["version"]
 description = "Verify that your sources still say what you think they say"
 readme = "README.md"
 license = "ISC"
@@ -47,8 +47,12 @@ dev = [
     "pyshacl>=0.26",
     "apywire>=1.0",
     "mypy>=1.0",
+    "ruff>=0.6",
     "pylode>=3.0,<3.6",
 ]
+
+[tool.setuptools.dynamic]
+version = {attr = "apysource.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -56,6 +60,16 @@ include = ["apysource*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+# Generated file — never hand-edit, so don't lint it.
+extend-exclude = ["apysource/_defaults.py"]
+
+[tool.ruff.lint]
+# Conservative starting set: pyflakes (F) + pycodestyle errors (E).
+select = ["E", "F"]
 
 [tool.mypy]
 warn_return_any = true

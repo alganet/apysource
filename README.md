@@ -6,6 +6,7 @@ SPDX-License-Identifier: ISC
 
 # apysource
 
+[![PyPI](https://img.shields.io/pypi/v/apysource)](https://pypi.org/project/apysource/)
 [![Tests](https://github.com/alganet/apysource/actions/workflows/test.yml/badge.svg)](https://github.com/alganet/apysource/actions/workflows/test.yml)
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
 [![License: ISC](https://img.shields.io/badge/license-ISC-green)](LICENSE)
@@ -86,12 +87,12 @@ apysource add sources.yaml "https://www.un.org/en/about-us/un-charter/full-text"
 
 apysource supports several ways to pinpoint where in a document your snippet lives:
 
-| Targetter | Key | Example | Best for |
-|---|---|---|---|
-| **Section** | `section` | `"Chapter I, Article 1"` | Structured documents (HTML, Markdown, Wikitext, RFC) |
-| **CSS selector** | `selector` | `"div.content p"` | HTML pages |
-| **Line range** | `lines` | `"40-41"` | Plain text, RFCs |
-| **Repo location** | `location` | `"chapter:1"` | Repository modules (Gutenberg, Wikisource, etc.) |
+| Targetter         | Key        | Example                  | Best for                                             |
+|-------------------|------------|--------------------------|------------------------------------------------------|
+| **Section**       | `section`  | `"Chapter I, Article 1"` | Structured documents (HTML, Markdown, Wikitext, RFC) |
+| **CSS selector**  | `selector` | `"div.content p"`        | HTML pages                                           |
+| **Line range**    | `lines`    | `"40-41"`                | Plain text, RFCs                                     |
+| **Repo location** | `location` | `"chapter:1"`            | Repository modules (Gutenberg, Wikisource, etc.)     |
 
 **Section selectors** are the most versatile — they work across HTML, Markdown, Wikitext, and RFC plain text. They support roman numeral equivalence (`Chapter IV` = `Chapter 4`), nested paths (`Chapter I, Article 1, paragraph 2`), and quoted titles (`'The Fox and the Grapes'`).
 
@@ -107,33 +108,33 @@ Each YAML file has a top-level `sources` list. Each source has nested `fragments
 
 ### Source properties
 
-| Key | What it does |
-|---|---|
-| `label` | Name of the source (required) |
-| `url` | URL to fetch (required) |
-| `type` | IANA media type: `text/html`, `text/plain`, `text/markdown`, etc. Short names (`html`, `plain-text`) also accepted. Auto-detected if omitted. |
-| `language` | Language code, RFC 5646 (metadata) |
-| `title` | Document title (metadata) |
-| `date` | Publication or access date (metadata) |
-| `part_of` | Parent source label (for hierarchical sources) |
-| `isbn` | International Standard Book Number |
-| `doi` | Digital Object Identifier |
-| `publisher` | Publisher name |
-| `edition` | Edition or version |
-| `license` | License URI |
+| Key         | What it does                                                                                                                                  |
+|-------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| `label`     | Name of the source (required)                                                                                                                 |
+| `url`       | URL to fetch (required)                                                                                                                       |
+| `type`      | IANA media type: `text/html`, `text/plain`, `text/markdown`, etc. Short names (`html`, `plain-text`) also accepted. Auto-detected if omitted. |
+| `language`  | Language code, RFC 5646 (metadata)                                                                                                            |
+| `title`     | Document title (metadata)                                                                                                                     |
+| `date`      | Publication or access date (metadata)                                                                                                         |
+| `part_of`   | Parent source label (for hierarchical sources)                                                                                                |
+| `isbn`      | International Standard Book Number                                                                                                            |
+| `doi`       | Digital Object Identifier                                                                                                                     |
+| `publisher` | Publisher name                                                                                                                                |
+| `edition`   | Edition or version                                                                                                                            |
+| `license`   | License URI                                                                                                                                   |
 
 ### Fragment properties
 
-| Key | What it does |
-|---|---|
-| `label` | Name of the fragment (required) |
-| `snippet` | The text you expect to find |
-| `selector` | CSS selector to narrow extraction (HTML) |
-| `lines` | Line range to extract, e.g. `30-35` |
-| `section` | Human-readable section selector, e.g. `Chapter I, Article 1` |
-| `location` | Repo-specific location hint (e.g. `chapter:1`) |
-| `page_start` | Starting page number (for print sources) |
-| `page_end` | Ending page number (for print sources) |
+| Key          | What it does                                                 |
+|--------------|--------------------------------------------------------------|
+| `label`      | Name of the fragment (required)                              |
+| `snippet`    | The text you expect to find                                  |
+| `selector`   | CSS selector to narrow extraction (HTML)                     |
+| `lines`      | Line range to extract, e.g. `30-35`                          |
+| `section`    | Human-readable section selector, e.g. `Chapter I, Article 1` |
+| `location`   | Repo-specific location hint (e.g. `chapter:1`)               |
+| `page_start` | Starting page number (for print sources)                     |
+| `page_end`   | Ending page number (for print sources)                       |
 
 ## CLI
 
@@ -141,16 +142,18 @@ Each YAML file has a top-level `sources` list. Each source has nested `fragments
 apysource [-c config.toml] <command> [args...]
 ```
 
-| Command | What it does |
-|---|---|
-| `check [sources.yaml] [--provenance file.ttl]` | Fetch, extract, and verify all snippets |
-| `locate <url> <snippet>` | Find a snippet in a page, show the targetter |
-| `add <file> <url> <snippet>` | Locate a snippet and add it to a YAML file |
-| `validate` | Check that `.ttl` files parse correctly (with optional SHACL) |
+| Command                                        | What it does                                                  |
+|------------------------------------------------|---------------------------------------------------------------|
+| `check [sources.yaml] [--provenance file.ttl]` | Fetch, extract, and verify all snippets                       |
+| `locate <url> <snippet>`                       | Find a snippet in a page, show the targetter                  |
+| `add <file> <url> <snippet>`                   | Locate a snippet and add it to a YAML file                    |
+| `validate`                                     | Check that `.ttl` files parse correctly (with optional SHACL) |
 
 Without `-c`, apysource uses built-in defaults (all built-in repos enabled). Pass `-c config.toml` to customize repos and HTTP settings (requires `pip install apysource[dev]`).
 
 Pass `--provenance file.ttl` to `check` to write a PROV-O graph recording which fragments were verified, when, and by which activity.
+
+Fetched pages are cached on disk and reused indefinitely (no time-based expiry). Pass `--refresh` to `check`, `locate`, or `add` to bypass the cache and re-fetch. See [docs/advanced.md](docs/advanced.md#caching-and-freshness).
 
 ## Advanced Features
 

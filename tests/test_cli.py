@@ -4,46 +4,23 @@
 
 """Tests for CLI commands with injected args (no sys.argv mutation)."""
 
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
-from rdflib import BNode, Graph, Literal, URIRef
-from rdflib.namespace import RDF, RDFS
+from rdflib import URIRef
+from rdflib.namespace import RDF
 
 from apysource.cli._base import CLIContext
-from apysource.namespaces import OA, SCHEMA, SV
+from apysource.namespaces import SV
 
-from tests.conftest import EMPTY_REGISTRY
-
-
-class _MockFetcher:
-    """Fetcher that returns canned HTML."""
-
-    def __init__(self, body: str = "<html><body><p>Hello world</p></body></html>"):
-        self.body = body
-
-    def get(self, url, **kw):
-        return self.body
+from tests.conftest import EMPTY_REGISTRY, MockFetcher, build_chain_graph
 
 
 def _make_check_graph():
     """Graph with one Fragment + Source for check-sources tests."""
-    g = Graph()
-    frag = URIRef("urn:test:frag1")
-    source = URIRef("urn:test:src1")
-    g.add((frag, RDF.type, SV.Fragment))
-    g.add((frag, RDFS.label, Literal("test frag")))
-    g.add((frag, SV.sourceLocation, Literal("lines:1-5")))
-    # OA target chain
-    target = BNode()
-    g.add((frag, OA.hasTarget, target))
-    g.add((target, RDF.type, OA.SpecificResource))
-    g.add((target, OA.hasSource, source))
-    g.add((source, RDF.type, SV.Source))
-    g.add((source, RDFS.label, Literal("test source")))
-    g.add((source, SCHEMA.url, Literal("http://example.com/page")))
-    return g
+    return build_chain_graph(
+        URIRef("urn:test:frag1"), URIRef("urn:test:src1"),
+        "http://example.com/page", label="test frag",
+    )
 
 
 # ── LocateCommand ────────────────────────────────────────────────────────
@@ -52,7 +29,7 @@ def test_locate_yaml_output(capsys):
     """LocateCommand emits YAML fragment when snippet is found."""
     from apysource.cli.locate import LocateCommand
 
-    fetcher = _MockFetcher()
+    fetcher = MockFetcher()
     cmd = LocateCommand(http_client=fetcher)
     cmd.run(args=["http://example.com/page", "Hello world"])
 
@@ -65,7 +42,7 @@ def test_locate_ttl_output(capsys):
     """LocateCommand emits Turtle with OA triples in --ttl mode."""
     from apysource.cli.locate import LocateCommand
 
-    fetcher = _MockFetcher()
+    fetcher = MockFetcher()
     cmd = LocateCommand(http_client=fetcher)
     cmd.run(args=["--ttl", "http://example.com/page", "Hello world"])
 
@@ -74,11 +51,30 @@ def test_locate_ttl_output(capsys):
     assert "oa:exact" in out or "exact" in out
 
 
+def test_locate_refresh_forces_fetch(capsys):
+    """--refresh makes LocateCommand fetch with force=True (bypass cache)."""
+    from apysource.cli.locate import LocateCommand
+
+    class _SpyFetcher(MockFetcher):
+        def __init__(self):
+            super().__init__()
+            self.force_values = []
+
+        def get(self, url, **kwargs):
+            self.force_values.append(kwargs.get("force", False))
+            return super().get(url, **kwargs)
+
+    fetcher = _SpyFetcher()
+    cmd = LocateCommand(http_client=fetcher)
+    cmd.run(args=["--refresh", "http://example.com/page", "Hello world"])
+    assert fetcher.force_values == [True]
+
+
 def test_locate_not_found(capsys):
     """LocateCommand exits 1 when snippet is not found."""
     from apysource.cli.locate import LocateCommand
 
-    fetcher = _MockFetcher()
+    fetcher = MockFetcher()
     cmd = LocateCommand(http_client=fetcher)
     with pytest.raises(SystemExit, match="1"):
         cmd.run(args=["http://example.com/page", "nonexistent text xyz"])
@@ -88,7 +84,7 @@ def test_locate_usage(capsys):
     """LocateCommand prints usage when too few args."""
     from apysource.cli.locate import LocateCommand
 
-    fetcher = _MockFetcher()
+    fetcher = MockFetcher()
     cmd = LocateCommand(http_client=fetcher)
     with pytest.raises(SystemExit, match="1"):
         cmd.run(args=[])
@@ -102,7 +98,7 @@ def test_add_creates_entry(tmp_path, capsys):
     from apysource.cli.add import AddCommand
 
     yaml_path = tmp_path / "sources.yaml"
-    fetcher = _MockFetcher()
+    fetcher = MockFetcher()
     cmd = AddCommand(http_client=fetcher)
     cmd.run(args=[str(yaml_path), "http://example.com/page", "Hello world"])
 
@@ -130,7 +126,7 @@ def test_add_appends_to_existing(tmp_path, capsys):
         }]
     }))
 
-    fetcher = _MockFetcher()
+    fetcher = MockFetcher()
     cmd = AddCommand(http_client=fetcher)
     cmd.run(args=[str(yaml_path), "http://example.com/page", "Hello world"])
 
@@ -179,8 +175,10 @@ def test_check_sources_exits_on_failure(capsys):
     with pytest.raises(SystemExit) as exc_info:
         cmd.run(graph=g, args=[])
 
-    # Should exit (either 0 or 1 depending on resolution)
-    assert exc_info.value.code in (0, 1)
+    # No repos and no fetcher -> fragment cannot resolve -> failure -> exit 1.
+    assert exc_info.value.code == 1
+    out = capsys.readouterr().out
+    assert "FAIL" in out
 
 
 def test_check_sources_provenance_output(tmp_path, capsys):
@@ -199,7 +197,6 @@ def test_check_sources_provenance_output(tmp_path, capsys):
     assert prov_file.exists()
     # Parse and verify it contains a VerificationActivity
     from rdflib import Graph as RdfGraph
-    from rdflib.namespace import RDF
     pg = RdfGraph()
     pg.parse(str(prov_file), format="turtle")
     activities = list(pg.subjects(RDF.type, SV.VerificationActivity))

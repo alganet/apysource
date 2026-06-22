@@ -13,13 +13,23 @@ from datetime import datetime, timezone
 from typing import Any, cast
 
 from rdflib import BNode, Graph, Literal, URIRef
-from rdflib.namespace import RDF, RDFS, XSD
+from rdflib.namespace import RDF, XSD
 
 from apysource.graph import local_name
 from apysource.namespaces import PROV, SV
 from apysource.repos import RepoRegistry
 from apysource.resolution import _get_snippet, get_text, resolve_chain, resolve_direct
 from apysource.results import CheckResult, Failure
+
+#: Minimum extracted-content length (in characters) to treat as a usable
+#: extraction. Below this, the snippet/extraction check fails rather than
+#: silently matching against near-empty text.
+MIN_EXTRACT_CHARS = 20
+
+
+def _normalize_ws(text: str) -> str:
+    """Collapse runs of whitespace to single spaces and trim the ends."""
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def strip_headers(text: str) -> str:
@@ -33,7 +43,7 @@ def strip_headers(text: str) -> str:
 
 def run_checks(
     g: Graph, checks_config: list[dict[str, Any]], registry: RepoRegistry,
-    fetcher: Any = None, emit_provenance: bool = False,
+    fetcher: Any = None, emit_provenance: bool = False, force: bool = False,
 ) -> list[CheckResult] | tuple[list[CheckResult], Graph]:
     """Run all checks, return structured results.
 
@@ -75,7 +85,7 @@ def run_checks(
             chain_results = _run_chain_checks(g, entities, name, registry,
                                               fetcher=fetcher,
                                               prov_graph=prov_graph,
-                                              activity=activity)
+                                              activity=activity, force=force)
             results.extend(chain_results)
 
         elif mode == "direct":
@@ -89,7 +99,7 @@ def run_checks(
                                             f'"{loc}" -> {result.status}'))
                     continue
 
-                text = get_text(result, max_chars=50000)
+                text = get_text(result, max_chars=50000, force=force)
                 clean = strip_headers(text) if text else ""
                 if len(clean) >= 3:
                     ok_list.append(entity)
@@ -113,6 +123,7 @@ def _run_chain_checks(
     g: Graph, fragments: list[URIRef], base_name: str,
     registry: RepoRegistry, fetcher: Any = None,
     prov_graph: Graph | None = None, activity: BNode | None = None,
+    force: bool = False,
 ) -> list[CheckResult]:
     """Run the three chain-mode checks: cache resolution, content extraction,
     and snippet verification."""
@@ -148,10 +159,13 @@ def _run_chain_checks(
                                         f'"{loc}" -> no cache'))
             continue
 
-        text = get_text(result, max_chars=50000)
+        # Force a refresh (re-fetch) during the extraction phase only; the
+        # snippet phase below reads the now-fresh HTTP cache, so each source
+        # URL is fetched at most once per run.
+        text = get_text(result, max_chars=50000, force=force)
         clean = strip_headers(text)
 
-        if len(clean) < 20:
+        if len(clean) < MIN_EXTRACT_CHARS:
             loc = str(g.value(frag, SV.sourceLocation) or "")
             extract_fail.append(Failure(local_name(frag), local_name(frag),
                                         f'"{loc}" -> empty extraction ({len(clean)} chars)'))
@@ -162,16 +176,20 @@ def _run_chain_checks(
                               len(extract_ok), len(fragments), extract_fail))
 
     # CHECK: Snippet verified (reads oa:exact from TextQuoteSelector)
+    # Resolve each fragment's snippet once, then keep those long enough to verify.
+    snippets = {f: (_get_snippet(g, f) or "") for f in fragments}
     snippet_frags = [f for f in fragments
-                     if _get_snippet(g, f) is not None and
-                     len((_get_snippet(g, f) or "").strip()) >= 20]
+                     if len(snippets[f].strip()) >= MIN_EXTRACT_CHARS]
     snippet_ok = []
     snippet_fail = []
     for frag in snippet_frags:
-        snippet_str = _get_snippet(g, frag) or ""
-        norm_snippet = re.sub(r"\s+", " ", snippet_str).strip()
-        if norm_snippet.endswith("..."):
-            norm_snippet = norm_snippet[:-3]
+        norm_snippet = _normalize_ws(snippets[frag])
+        # A trailing ellipsis ("..." or "…") marks a deliberately elided quote:
+        # the author kept only the opening of a longer passage, so matching the
+        # retained prefix is correct. Stripping it leaves the text that must
+        # appear verbatim. Without an ellipsis, the *entire* snippet must appear
+        # in the source — otherwise drift in the tail would go undetected.
+        norm_snippet = re.sub(r"(\.\.\.|…)$", "", norm_snippet).strip()
 
         result = resolved[frag]
         if result.status != "resolved":
@@ -180,9 +198,9 @@ def _run_chain_checks(
             continue
 
         source_text = get_text(result, max_chars=100000)
-        norm_source = re.sub(r"\s+", " ", source_text).strip()
+        norm_source = _normalize_ws(source_text)
 
-        if norm_snippet[:80] in norm_source:
+        if norm_snippet and norm_snippet in norm_source:
             snippet_ok.append(frag)
             # Record provenance for verified fragments
             if prov_graph is not None and activity is not None:

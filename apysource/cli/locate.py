@@ -13,7 +13,14 @@ from rdflib.namespace import RDF
 
 from rdflib.namespace import DCTERMS
 
-from apysource.formats import ContentFormat, LocateResult, detect_format, locate_snippet, normalize_mime_type
+from apysource.cli._base import pop_flag
+from apysource.formats import (
+    ContentFormat,
+    LocateResult,
+    detect_format,
+    locate_snippet,
+    normalize_mime_type,
+)
 from apysource.namespaces import OA, SCHEMA, SV, new_graph
 from apysource.sections import locate_section
 
@@ -32,12 +39,14 @@ def _extract_title(body: str, fmt: ContentFormat) -> str:
     return ""
 
 
-def find_snippet(http_client, url: str, snippet: str) -> tuple[str, str, LocateResult]:
+def find_snippet(http_client, url: str, snippet: str,
+                 *, force: bool = False) -> tuple[str, str, LocateResult]:
     """Fetch URL, locate snippet, return (content_type, title, result).
 
+    ``force=True`` bypasses the HTTP cache and re-fetches the URL.
     Raises SystemExit on fetch failure or snippet not found.
     """
-    body = http_client.get(url)
+    body = http_client.get(url, force=force)
     if not body:
         print(f"Error: could not fetch {url}", file=sys.stderr)
         sys.exit(1)
@@ -134,26 +143,32 @@ def format_turtle(url: str, content_type: str, snippet: str,
 
 
 class LocateCommand:
+    """Locate a snippet at a URL and print a YAML fragment (or Turtle, ``--ttl``).
+
+    Accepts ``--refresh`` to re-fetch the URL, bypassing the HTTP cache.
+    """
+
     def __init__(self, http_client):
         self.http_client = http_client
 
     def run(self, args: list[str] | None = None):
+        """Fetch the URL, locate the snippet, and print the result."""
         if args is None:
             args = sys.argv[1:]
 
-        ttl_mode = "--ttl" in args
-        if ttl_mode:
-            args = [a for a in args if a != "--ttl"]
+        ttl_mode, args = pop_flag(args, "--ttl")
+        force, args = pop_flag(args, "--refresh")
 
         if len(args) < 2:
-            print("Usage: apysource locate [--ttl] <url> <snippet>",
+            print("Usage: apysource locate [--ttl] [--refresh] <url> <snippet>",
                   file=sys.stderr)
             sys.exit(1)
 
         url = args[0]
         snippet = args[1]
 
-        content_type, title, result = find_snippet(self.http_client, url, snippet)
+        content_type, title, result = find_snippet(
+            self.http_client, url, snippet, force=force)
 
         if ttl_mode:
             print(format_turtle(url, content_type, snippet, result))

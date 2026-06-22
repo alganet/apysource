@@ -183,7 +183,6 @@ class MarkdownFormat:
 
     def detect(self, body: str) -> bool:
         """Detect Markdown by ATX headings (``# Title``), not HTML structure."""
-        head = body[:1000].lstrip()
         # Reject if it looks like HTML
         if HtmlFormat().detect(body):
             return False

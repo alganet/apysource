@@ -9,6 +9,7 @@ from pathlib import Path
 
 import yaml
 
+from apysource.cli._base import pop_flag
 from apysource.cli.locate import find_snippet, _targetter_key
 from apysource.formats import normalize_mime_type
 
@@ -23,12 +24,22 @@ def _auto_label(snippet: str, max_words: int = 5) -> str:
 
 
 class AddCommand:
+    """Locate a snippet at a URL and append it as a fragment to a YAML file.
+
+    Reuses an existing source entry with the same URL or creates one. Accepts
+    ``--label <name>`` and ``--refresh`` (re-fetch, bypassing the HTTP cache).
+    """
+
     def __init__(self, http_client: object) -> None:
         self.http_client = http_client
 
     def run(self, args: list[str] | None = None) -> None:
+        """Locate the snippet and write it into the YAML sources file."""
         if args is None:
             args = sys.argv[1:]
+
+        # Parse --refresh flag (re-fetch the URL, bypassing the HTTP cache)
+        force, args = pop_flag(args, "--refresh")
 
         # Parse --label flag
         label = None
@@ -42,7 +53,8 @@ class AddCommand:
                 sys.exit(1)
 
         if len(args) < 3:
-            print("Usage: apysource add <sources.yaml> <url> <snippet> [--label name]",
+            print("Usage: apysource add <sources.yaml> <url> <snippet> "
+                  "[--label name] [--refresh]",
                   file=sys.stderr)
             sys.exit(1)
 
@@ -54,7 +66,8 @@ class AddCommand:
             label = _auto_label(snippet)
 
         # Locate the snippet
-        content_type, title, result = find_snippet(self.http_client, url, snippet)
+        content_type, title, result = find_snippet(
+            self.http_client, url, snippet, force=force)
         key = _targetter_key(result)
 
         print(f"  Located: {result.format_name} → {result.locator}",

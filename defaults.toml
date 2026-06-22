@@ -13,7 +13,8 @@ http_cache_dir = "data/cache"
 
 # ── Constants ────────────────────────────────────────────────────────────
 
-user_agent = "apysource/1.0 (source verification; gentle crawler)"
+# user_agent intentionally omitted: CachedFetcher derives a version-tracking
+# default from apysource.__version__. Set it here only to override.
 default_crawl_delay = 3.0
 default_http_timeout = 30
 
@@ -35,7 +36,6 @@ wiktionary_base_url = "https://en.wiktionary.org"
 
 ["apysource.http.CachedFetcher http_client"]
 cache_dir = "{http_cache_dir}"
-user_agent = "{user_agent}"
 default_delay = "{default_crawl_delay}"
 default_timeout = "{default_http_timeout}"
 

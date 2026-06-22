@@ -34,6 +34,39 @@ def test_load_triples_split_returns_graphs():
     assert len(data_g) > 0
 
 
+def _write_ttl(path: Path, subject: str):
+    path.write_text(
+        '@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n'
+        f'<http://example.org/{subject}> rdfs:label "{subject}" .\n',
+        encoding="utf-8",
+    )
+
+
+def test_load_triples_classifies_by_filename_not_path(tmp_path):
+    """A data file under a directory whose name contains 'shapes' is still
+    loaded — classification must use the file name, not the full path."""
+    data_dir = tmp_path / "shapes-archive"  # path contains "shapes"
+    data_dir.mkdir()
+    _write_ttl(data_dir / "data.ttl", "thing")
+
+    g = load_triples(tmp_path)
+    assert any("example.org/thing" in str(s) for s in g.subjects())
+
+
+def test_load_triples_split_classifies_by_filename(tmp_path):
+    """A shapes file goes to the shapes graph; a data file under a path that
+    contains 'shapes' still goes to the data graph."""
+    nested = tmp_path / "shapes-dir"
+    nested.mkdir()
+    _write_ttl(nested / "data.ttl", "datum")     # data, despite the dir name
+    _write_ttl(tmp_path / "shapes.ttl", "shape")  # shapes, by file name
+
+    data_g, shapes_g, errors = load_triples_split(tmp_path)
+    assert errors == []
+    assert any("example.org/datum" in str(s) for s in data_g.subjects())
+    assert any("example.org/shape" in str(s) for s in shapes_g.subjects())
+
+
 # ── local_name ────────────────────────────────────────────────────────────
 
 def test_local_name_extracts_fragment():

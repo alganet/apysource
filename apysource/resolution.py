@@ -156,10 +156,16 @@ def resolve_direct(g: Graph, entity_uri: URIRef, registry: RepoRegistry,
     return ResolveResult(status="no_module", url=url)
 
 
-def get_text(result: ResolveResult, max_chars: int = 5000) -> str:
-    """Extract content text using the repo or fetcher from the resolve result."""
+def get_text(result: ResolveResult, max_chars: int = 5000,
+             *, force: bool = False) -> str:
+    """Extract content text using the repo or fetcher from the resolve result.
+
+    ``force=True`` bypasses the HTTP cache for fetcher-backed results, causing
+    a fresh download (and re-cache). It has no effect on repo-backed results,
+    which read already-crawled files.
+    """
     if isinstance(result, FetcherResult) and result.fetcher is not None:
-        body = result.fetcher.get(result.url)
+        body = result.fetcher.get(result.url, force=force)
         if not body:
             return ""
 

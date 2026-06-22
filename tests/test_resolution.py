@@ -5,7 +5,6 @@
 """Tests for apysource.resolution with synthetic RDF graphs."""
 
 import re
-from pathlib import Path
 
 from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS, RDF, RDFS
@@ -13,7 +12,9 @@ from rdflib.namespace import DCTERMS, RDF, RDFS
 from apysource.namespaces import OA, SCHEMA, SV
 from apysource.repos import RepoRegistry
 from apysource.resolution import get_text, resolve_chain, resolve_direct
-from apysource.results import FetcherResult, RepoResult, ResolveResult
+from apysource.results import FetcherResult, RepoResult
+
+from tests.conftest import MockFetcher, build_chain_graph
 
 
 # ── Mock repo ────────────────────────────────────────────────────────
@@ -46,25 +47,6 @@ def _make_registry(mock_repo):
     return RepoRegistry([mock_repo])
 
 
-def _build_chain_graph(frag_uri, source_uri, url, location="lines:1-2"):
-    """Build a minimal OA-native graph: Fragment → hasTarget → hasSource → Source."""
-    g = Graph()
-    g.add((frag_uri, RDF.type, SV.Fragment))
-    g.add((frag_uri, RDFS.label, Literal("test fragment")))
-    g.add((frag_uri, SV.sourceLocation, Literal(location)))
-
-    # OA target chain (replaces sv:fragmentSource)
-    target = BNode()
-    g.add((frag_uri, OA.hasTarget, target))
-    g.add((target, RDF.type, OA.SpecificResource))
-    g.add((target, OA.hasSource, source_uri))
-
-    g.add((source_uri, RDF.type, SV.Source))
-    g.add((source_uri, RDFS.label, Literal("test source")))
-    g.add((source_uri, SCHEMA.url, Literal(url)))
-    return g
-
-
 # ── resolve_chain ────────────────────────────────────────────────────
 
 def test_resolve_chain_resolved(tmp_path):
@@ -77,7 +59,7 @@ def test_resolve_chain_resolved(tmp_path):
 
     frag = URIRef("http://example.com/data/test#frag1")
     source = URIRef("http://example.com/data/test#src1")
-    g = _build_chain_graph(frag, source, "http://example.com/item")
+    g = build_chain_graph(frag, source, "http://example.com/item")
 
     result = resolve_chain(g, frag, registry)
 
@@ -160,20 +142,10 @@ def test_get_text_without_cache_file():
 
 # ── Fetcher fallback (repo-free) ────────────────────────────────────
 
-class _MockFetcher:
-    """Minimal mock for CachedFetcher."""
-
-    def __init__(self, cached_content=None):
-        self._content = cached_content
-
-    def get(self, url, *, from_cache=False):
-        return self._content
-
-
 def _build_chain_graph_with_selectors(frag_uri, source_uri, url, source_type,
                                        css_selector=None, lines=None):
     """Build a graph with dcterms:format and OA selectors."""
-    g = _build_chain_graph(frag_uri, source_uri, url)
+    g = build_chain_graph(frag_uri, source_uri, url)
     g.add((source_uri, DCTERMS.format, Literal(source_type)))
 
     # Get the existing target bnode
@@ -193,7 +165,7 @@ def test_resolve_chain_http_fallback():
     """No matching repo but fetcher provided resolves via HTTP fallback."""
     frag = URIRef("http://other.com/data#frag1")
     source = URIRef("http://other.com/data#src1")
-    fetcher = _MockFetcher()
+    fetcher = MockFetcher()
     g = _build_chain_graph_with_selectors(
         frag, source, "http://other.com/page",
         "html", css_selector="div.content", lines="10-20",
@@ -213,7 +185,7 @@ def test_resolve_chain_no_fetcher_no_repo():
     """No repo and no fetcher still returns 'no_module'."""
     frag = URIRef("http://other.com/data#frag1")
     source = URIRef("http://other.com/data#src1")
-    g = _build_chain_graph(frag, source, "http://other.com/page")
+    g = build_chain_graph(frag, source, "http://other.com/page")
 
     registry = RepoRegistry([])
     result = resolve_chain(g, frag, registry)
@@ -237,7 +209,7 @@ def test_resolve_direct_http_fallback():
     g.add((css, RDF.type, OA.CssSelector))
     g.add((css, RDF.value, Literal("p.extract")))
 
-    fetcher = _MockFetcher()
+    fetcher = MockFetcher()
     registry = RepoRegistry([])
     result = resolve_direct(g, entity, registry, fetcher=fetcher)
 
@@ -249,7 +221,7 @@ def test_resolve_direct_http_fallback():
 def test_get_text_with_fetcher():
     """get_text extracts content via fetcher when result has fetcher key."""
     html = '<div><p class="target">Extracted text here</p></div>'
-    fetcher = _MockFetcher(cached_content=html)
+    fetcher = MockFetcher(html)
 
     result = FetcherResult(
         status="resolved",
@@ -263,9 +235,29 @@ def test_get_text_with_fetcher():
     assert "Extracted text here" in text
 
 
+def test_get_text_force_passes_through_to_fetcher():
+    """get_text(force=True) bypasses the HTTP cache via fetcher.get(force=True)."""
+    class _SpyFetcher(MockFetcher):
+        def __init__(self):
+            super().__init__("<p>body</p>")
+            self.forces = []
+
+        def get(self, url, **kwargs):
+            self.forces.append(kwargs.get("force"))
+            return super().get(url, **kwargs)
+
+    fetcher = _SpyFetcher()
+    result = FetcherResult(
+        status="resolved", url="http://other.com/page",
+        fetcher=fetcher, format_name="html", locator=None,
+    )
+    get_text(result, force=True)
+    assert fetcher.forces == [True]
+
+
 def test_get_text_with_fetcher_no_cache():
     """get_text returns empty when fetcher has no cached content."""
-    fetcher = _MockFetcher(cached_content=None)
+    fetcher = MockFetcher(None)
 
     result = FetcherResult(
         status="resolved",

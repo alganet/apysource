@@ -7,6 +7,13 @@
 from pathlib import Path
 
 
+def pop_flag(args: list[str], name: str) -> tuple[bool, list[str]]:
+    """Return (present, args_without_flag) for a boolean flag like ``--refresh``."""
+    if name in args:
+        return True, [a for a in args if a != name]
+    return False, args
+
+
 class CLIContext:
     """Resolved paths and shared state for all CLI commands."""
 
