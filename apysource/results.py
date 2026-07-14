@@ -29,23 +29,38 @@ class ResolveResult:
 
 @dataclass
 class RepoResult(ResolveResult):
-    """Resolved via a repository module."""
+    """Resolved via a repository module.
+
+    ``cache_file`` of ``None`` means the document has not been crawled yet,
+    not that this is not a repo's document. Routing is decided by the URL the
+    citation names, never by what happens to be on disk — otherwise a cold
+    cache silently changes *which document* is the source of truth.
+    """
 
     location: str = ""
     module: str = ""
     repo: BaseRepo | None = None
+    key: str = ""
     cache_file: str | None = None
 
 
 @dataclass
 class FetcherResult(ResolveResult):
-    """Resolved via HTTP fetcher (no repo needed)."""
+    """Resolved via HTTP fetcher (no repo needed).
+
+    ``fallback_from`` names the repo that claimed this URL but could not
+    serve it. The fetch still happens — but against the rendered web page
+    rather than the repository the citation names, which is a different
+    document, and the report says so instead of letting it pass unremarked.
+    """
 
     location: str = ""
     module: str = "http"
     fetcher: CachedFetcher | None = None
     format_name: str = ""
     locator: str | None = None
+    fallback_from: str = ""
+    fallback_reason: str = ""
 
 
 # ── Repo outcomes ───────────────────────────────────────────────────────

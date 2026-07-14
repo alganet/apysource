@@ -25,24 +25,51 @@ class MockFetcher:
     asserting which URLs were requested.
     """
 
-    def __init__(self, content=DEFAULT_HTML, *, routes=None, redirects=None):
+    def __init__(self, content=DEFAULT_HTML, *, routes=None, redirects=None,
+                 statuses=None):
         self.content = content
         self.routes = routes or {}
         self.redirects = redirects or {}
+        self.statuses = statuses or {}
         self.calls = []
+        #: (url, kwargs) per request, so a test can assert *how* it was asked —
+        #: a per-repo crawl delay that never reaches the fetch is decoration.
+        self.requests = []
 
-    def get(self, url, **kwargs):
-        self.calls.append(url)
+    def _body(self, url):
+        """The canned response for a URL, without recording a call."""
         for fragment, response in self.routes.items():
             if fragment in url:
                 return response
         return self.content
+
+    def get(self, url, **kwargs):
+        self.calls.append(url)
+        self.requests.append((url, kwargs))
+        return self._body(url)
 
     def get_bytes(self, url, **kwargs):
         response = self.get(url, **kwargs)
         if isinstance(response, str):
             return response.encode("utf-8")
         return response
+
+    def status_for(self, url):
+        """The status a fetch got, as the real fetcher reports it.
+
+        Defaults to 404 for a URL that answered ``None`` — the common case a
+        repo cares about. Pass ``statuses={url: 503}`` (or ``{url: None}``, for
+        a request that never reached a server) to say otherwise, which is how
+        the "a timeout is not an absence" tests are written.
+
+        Asking does not count as fetching; it must not show up in ``calls``,
+        or a test that proves a URL was never fetched would prove it by
+        accident and then stop being able to.
+        """
+        for fragment, status in self.statuses.items():
+            if fragment in url:
+                return status
+        return 404 if self._body(url) is None else 200
 
     def redirect_for(self, url):
         """Where a URL landed, as the real fetcher would report it.
