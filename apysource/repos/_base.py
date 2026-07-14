@@ -7,8 +7,25 @@
 No config imports — all values received as parameters.
 """
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
+from typing import Any
+
+from apysource.repos.errors import RepoError, RepoNotFound, RepoUnavailable
+from apysource.results import CrawlOutcome
+
+__all__ = [
+    "SMALL_FILE_THRESHOLD",
+    "BaseRepo",
+    "RepoError",
+    "RepoNotFound",
+    "RepoUnavailable",
+    "extract_content_with_fallback",
+    "extract_line_range",
+    "slugify",
+]
 
 
 class BaseRepo:
@@ -22,8 +39,23 @@ class BaseRepo:
 
     NAME = ""
 
-    def __init__(self, cache_dir=None, http_client=None,
-                 url_pattern=None, base_url=None):
+    #: Whether this repo can fetch a document it does not already have.
+    #:
+    #: A repo that only reads a cache someone else populated leaves this
+    #: False, and a cold cache is then *reported* rather than silently
+    #: re-routed to the generic fetcher — which would verify the citation
+    #: against the rendered web page instead of against the repository the
+    #: citation names. Two different documents; no signal that it happened.
+    #:
+    #: A flag, and not ``hasattr(repo, "crawl")``: duck-typing this would be
+    #: true for any repo that happened to name a private helper ``crawl``,
+    #: and the cost of guessing wrong is a network fetch and a changed source
+    #: of truth.
+    supports_crawl: bool = False
+
+    def __init__(self, cache_dir: Any = None, http_client: Any = None,
+                 url_pattern: Any = None, base_url: str | None = None,
+                 crawl_delay: float | None = None) -> None:
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.http_client = http_client
         if url_pattern is None:
@@ -34,12 +66,29 @@ class BaseRepo:
                             else url_pattern)
         self.base_url = base_url.rstrip("/")
 
+        #: Politeness gap for *this* repo's fetches. None means "use the
+        #: fetcher's default". It is passed per request and never assigned
+        #: onto the shared fetcher: a repo backed by a CDN can be read
+        #: briskly without turning every other source — rfc-editor,
+        #: archive.org — into a rude crawl as a side effect.
+        self.crawl_delay = crawl_delay
+
+        self._crawls: dict[str, CrawlOutcome] = {}
+
+    # ── Source interface ──────────────────────────────────────────────
+
     def url_to_key(self, url: str) -> str | None:
         """Extract a cache key from a URL. Subclasses must override."""
         raise NotImplementedError
 
     def resolve_location(self, location: str, key: str) -> Path | None:
-        """Resolve a location to a cache file path. Subclasses must override."""
+        """Resolve a location to a cache file path. Subclasses must override.
+
+        This is a *cache lookup*. It must not fetch: resolution asks it what
+        is on disk, and a resolver that quietly reaches for the network makes
+        every caller's cost and failure modes unpredictable. Fetching is what
+        ``crawl`` is for.
+        """
         raise NotImplementedError
 
     def is_cached(self, key: str) -> bool:
@@ -51,6 +100,60 @@ class BaseRepo:
         """Extract content using line range with small-file fallback."""
         text = file_path.read_text(encoding="utf-8", errors="replace")
         return extract_content_with_fallback(text, location)
+
+    # ── Crawler interface ─────────────────────────────────────────────
+
+    def crawl(self, key: str, *, delay: float | None = None,
+              force: bool = False, from_cache: bool = False) -> Any:
+        """Fetch and cache the document for ``key``.
+
+        The contract, for anyone implementing it:
+
+        - return once the document is on disk, such that
+          ``resolve_location`` finds it for any location it supports;
+        - raise :class:`RepoNotFound` when the repository authoritatively
+          has no such document, having written *nothing* — so a page that
+          returns upstream verifies on the next run with no ``--refresh``;
+        - raise :class:`RepoUnavailable` when the fetch failed for any other
+          reason. A timeout is not an absence.
+
+        Implementations must set ``supports_crawl = True``. The return value
+        is unspecified and the library ignores it.
+        """
+        raise NotImplementedError
+
+    def ensure(self, key: str, *, force: bool = False) -> None:
+        """Crawl ``key`` at most once per run, replaying the same outcome.
+
+        Twenty fragments citing one missing page must produce one request and
+        twenty identical failures — not twenty requests, and not one failure
+        followed by nineteen different ones.
+        """
+        if not force and key in self._crawls:
+            outcome = self._crawls[key]
+            if outcome.status == "not_found":
+                raise RepoNotFound(self.NAME, key, outcome.reason)
+            if outcome.status == "unavailable":
+                raise RepoUnavailable(self.NAME, key, outcome.reason)
+            return
+
+        try:
+            self.crawl(key, delay=self.crawl_delay, force=force)
+        except RepoError as e:
+            status = "not_found" if isinstance(e, RepoNotFound) else "unavailable"
+            self._crawls[key] = CrawlOutcome(self.NAME, key, status, e.reason)
+            raise
+
+        self._crawls[key] = CrawlOutcome(self.NAME, key, "ok")
+
+    def crawl_outcome(self, key: str) -> CrawlOutcome | None:
+        """What happened when this key was crawled, or None if it never was.
+
+        A warm cache crawls nothing, so it has no outcome. Reporting must
+        read that as "nothing to say", not as a pass.
+        """
+        return self._crawls.get(key)
+
 
 SMALL_FILE_THRESHOLD = 5000
 

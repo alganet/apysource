@@ -15,23 +15,32 @@ from apysource.repos._base import (  # noqa: F401 — public re-exports
     extract_line_range,
     slugify,
 )
+from apysource.repos.errors import (  # noqa: F401 — public re-exports
+    RepoError,
+    RepoNotFound,
+    RepoUnavailable,
+)
 
 
 class RepoRegistry:
     """Registry of repo instances. Constructed explicitly, injected everywhere.
 
-    Repos that don't set cache_dir or http_client get them from the registry:
-    cache_dir defaults to sources_cache_dir / repo.NAME, http_client is shared.
+    Repos that don't set cache_dir, http_client or crawl_delay get them from
+    the registry: cache_dir defaults to sources_cache_dir / repo.NAME, and
+    http_client and default_crawl_delay are shared.
     """
 
     def __init__(self, repos: list[BaseRepo], sources_cache_dir: str | Path | None = None,
-                 http_client: object | None = None) -> None:
+                 http_client: object | None = None,
+                 default_crawl_delay: float | None = None) -> None:
         self.repos = repos
         for repo in repos:
             if getattr(repo, "cache_dir", None) is None and sources_cache_dir:
                 repo.cache_dir = Path(sources_cache_dir) / repo.NAME
             if getattr(repo, "http_client", None) is None and http_client:
                 repo.http_client = http_client
+            if getattr(repo, "crawl_delay", None) is None and default_crawl_delay is not None:
+                repo.crawl_delay = float(default_crawl_delay)
 
     def get_repo(self, url: str) -> BaseRepo | None:
         """Find the repo that handles a given URL."""
