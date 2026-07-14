@@ -32,9 +32,11 @@ All notable changes to this project are documented here. The format is based on
   the document and diffing it by hand.
 - Redirects are now surfaced instead of being followed silently. A source whose URL has moved
   still verifies — against the document it was forwarded to — so `check` reports a new
-  `source urls` check that names the new destination, `locate`/`add` note it on stderr, and
-  `--strict-redirects` turns the warning into a failure. A page cached before this existed
-  reports its destination as *unknown* rather than clean; `--refresh` resolves that.
+  `Source URLs` check naming the new destination, `locate`/`add` note it on stderr, and
+  `--strict-redirects` turns the warning into a failure. A page cached before this existed has
+  no recorded destination; that is reported as *unknown*, not passed over as clean, and
+  `--refresh` resolves it. A URL that moved to a page which is now **gone** keeps its redirect
+  chain, so the report can say the move led nowhere rather than only "could not fetch".
 - `--refresh` flag on `check`, `locate`, and `add` to bypass the HTTP cache and re-fetch sources.
 - `AUDIT.md` — a full-breadth audit of the codebase, tests, and documentation.
 - `CHANGELOG.md`, `CONTRIBUTING.md`, and `SECURITY.md`.

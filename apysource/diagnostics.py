@@ -8,212 +8,306 @@ A quote either appears in the source or it does not, and saying only that
 leaves the reader to fetch the document and diff it by hand — which is the
 authoring loop, run blind. When a snippet fails, the source almost always
 contains something very close to it: a dropped parenthetical, a changed
-case, a stray backtick that survived rendering. Find that passage and show
+case, a stray backtick that survived rendering. Find that passage and say
 what differs.
 
-Everything here runs only on failure, so it can afford to be thorough.
+Everything works in words, not characters. Words are what the reader is
+comparing, and a character-level diff of a long quote is both unreadable
+and quadratic in its length.
+
+The one rule this module must never break: **do not claim something about
+the source that is not true.** A hint that sends the author hunting for a
+word already in front of them is worse than no hint at all.
 """
 
 import re
-from dataclasses import dataclass
+import string
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
+
+from apysource.formats import TRUNCATION_MARKER, normalize_ws
 
 #: Below this similarity, the closest passage is not worth showing — the
 #: snippet is unrelated to the text, not a near-miss in it.
 MIN_SIMILARITY = 0.5
 
-#: get_text() truncates long extractions and appends this marker. It is not
-#: part of the document and must never surface inside a diff.
-_TRUNCATION_MARKER = re.compile(r"\n?\.\.\. \[\d+ more chars\]\s*$")
+#: Longest passage to render, in words. A block quote diffed in full is a
+#: wall of text no one reads.
+MAX_RENDERED_WORDS = 60
+
+#: Markup that survives into rendered-ish text. Underscore is deliberately
+#: absent: stripping it would report `get_text` as a marked-up `gettext`,
+#: and this tool's corpus is full of snake_case.
+_MARKUP = "`*"
+
+_ELISION = re.compile(r"(\.\.\.|…)$")
 
 
 @dataclass
-class Match:
-    """The passage in the source that comes closest to the snippet."""
+class Diagnosis:
+    """Why a snippet did not match, as data rather than as prose.
 
-    text: str
+    Kept structured so a machine-readable report can serve it without
+    parsing text back out of a rendered hint.
+    """
+
+    #: The passage in the source that comes closest to the snippet.
+    source_text: str
     ratio: float
-    #: A plain-language summary when the difference is entirely mechanical
-    #: ("differs only in case"), else "".
+    #: Set when the words are right and only the typography is wrong.
     kind: str = ""
+    #: Words the citation has that the passage does not, and vice versa.
+    missing: list[str] = field(default_factory=list)
+    extra: list[str] = field(default_factory=list)
+    #: The region that was searched (a section selector), when known.
+    where: str = ""
 
     @property
     def percent(self) -> int:
         return round(self.ratio * 100)
 
 
-def _normalize_ws(text: str) -> str:
-    """Collapse whitespace runs to single spaces and trim."""
-    return re.sub(r"\s+", " ", text).strip()
+def _words(text: str) -> list[str]:
+    """Split text into the words a reader would compare."""
+    text = normalize_ws(TRUNCATION_MARKER.sub("", text))
+    return _ELISION.sub("", text).strip().split()
 
 
-def strip_truncation_marker(text: str) -> str:
-    """Remove the "... [N more chars]" tail get_text() may have appended."""
-    return _TRUNCATION_MARKER.sub("", text)
+def _fold_case(word: str) -> str:
+    return word.casefold()
 
 
-def closest_match(snippet: str, source: str) -> Match | None:
-    """Find the passage of ``source`` that best matches ``snippet``.
+def _fold_punctuation(word: str) -> str:
+    return word.strip(string.punctuation)
 
-    Scans windows of roughly the snippet's length. ``quick_ratio`` is an
-    upper bound on ``ratio`` and far cheaper, so it screens the windows and
-    only the best few are scored properly.
 
-    Returns None when nothing is close enough to be worth showing.
+def _fold_markup(word: str) -> str:
+    return word.strip(_MARKUP)
+
+
+def _fold_all(word: str) -> str:
+    return _fold_punctuation(_fold_markup(word.casefold()))
+
+
+#: Ways a quote can be right about the words and wrong about the writing.
+#: Ordered from most specific to least, so the narrowest true statement wins
+#: — markup before punctuation, because `string.punctuation` contains the
+#: markup characters and would otherwise claim every backtick as a comma.
+_TYPOGRAPHY = [
+    ("differs only in case", _fold_case),
+    ("differs only in inline markup (backticks, emphasis)", _fold_markup),
+    ("differs only in punctuation", _fold_punctuation),
+    ("differs only in case, punctuation or markup", _fold_all),
+]
+
+
+def _sublist_index(haystack: list[str], needle: list[str]) -> int:
+    """Index of ``needle`` within ``haystack``, or -1. Whole words only."""
+    if not needle or len(needle) > len(haystack):
+        return -1
+    first = needle[0]
+    for i in range(len(haystack) - len(needle) + 1):
+        if haystack[i] == first and haystack[i:i + len(needle)] == needle:
+            return i
+    return -1
+
+
+def _typographic_difference(snippet: list[str],
+                            source: list[str]) -> tuple[str, list[str]] | None:
+    """Name the difference when the quote's words are all present.
+
+    Each candidate must be a *whole-word* match — folding across word
+    boundaries would let "the rat elimiter" claim to be "the rate limiter",
+    which is not a typo but a different sentence. And each must describe a
+    difference that actually exists: a passage identical to the snippet is
+    not a case difference.
     """
-    snippet = _normalize_ws(snippet)
-    source = _normalize_ws(strip_truncation_marker(source))
-    if not snippet or not source:
-        return None
-
-    mechanical = _mechanical_difference(snippet, source)
-    if mechanical is not None:
-        kind, exact = mechanical
-        if exact:
-            return Match(text=exact, ratio=1.0, kind=kind)
-    else:
-        kind = ""
-
-    width = len(snippet)
-    step = max(1, width // 4)
-    matcher = SequenceMatcher(autojunk=False)
-    matcher.set_seq2(snippet)
-
-    scored = []
-    for start in range(0, max(1, len(source) - width + 1), step):
-        window = source[start:start + width + width // 4]
-        matcher.set_seq1(window)
-        scored.append((matcher.quick_ratio(), window))
-
-    scored.sort(key=lambda pair: -pair[0])
-
-    best = None
-    for _, window in scored[:5]:
-        matcher.set_seq1(window)
-        ratio = matcher.ratio()
-        if best is None or ratio > best.ratio:
-            best = Match(text=window, ratio=ratio, kind=kind)
-
-    if best is None or best.ratio < MIN_SIMILARITY:
-        return None
-
-    best.text = _widen_to_words(source, best.text, width)
-    return best
-
-
-def _widen_to_words(source: str, window: str, width: int) -> str:
-    """Grow a window to whole words, with slack on each side.
-
-    Windows are cut at fixed offsets, so the passage that matches rarely
-    sits neatly inside one — a word of the snippet can fall just outside
-    the cut. Without slack the diff would then report that word as missing
-    from the source, which is a lie: it is missing from the *window*. Pad
-    first, and let the diff drop whatever context it does not need.
-    """
-    start = source.find(window)
-    if start < 0:
-        return window
-    end = start + len(window)
-
-    slack = max(8, width // 3)
-    start = max(0, start - slack)
-    end = min(len(source), end + slack)
-
-    while start > 0 and not source[start - 1].isspace():
-        start -= 1
-    while end < len(source) and not source[end - 1].isspace():
-        end += 1
-
-    return source[start:end].strip()
-
-
-def _mechanical_difference(snippet: str, source: str) -> tuple[str, str] | None:
-    """Name the difference when the snippet is present but for spelling.
-
-    These are the near-misses worth naming rather than diffing: the author
-    has the words right and the typography wrong, and a word-level diff
-    renders that as noise. Returns the kind and, where it can be recovered,
-    the source's exact wording — which is the thing to paste.
-    """
-    lowered = source.lower()
-    at = lowered.find(snippet.lower())
-    if at >= 0:
-        return "differs only in case", source[at:at + len(snippet)]
-
-    squashed_snippet = re.sub(r"\s+", "", snippet)
-    squashed_source = re.sub(r"\s+", "", source)
-    if squashed_snippet and squashed_snippet in squashed_source:
-        return "differs only in whitespace", ""
-
-    stripped_snippet = _strip_inline_markup(snippet)
-    stripped_source = _strip_inline_markup(source)
-    if stripped_snippet and stripped_snippet in stripped_source:
-        return "differs only in inline markup (backticks, emphasis)", ""
-
+    for kind, fold in _TYPOGRAPHY:
+        at = _sublist_index([fold(w) for w in source],
+                            [fold(w) for w in snippet])
+        if at < 0:
+            continue
+        found = source[at:at + len(snippet)]
+        if found == snippet:
+            # Identical. Whatever failed, it was not typography.
+            return None
+        return kind, found
     return None
 
 
-def _strip_inline_markup(text: str) -> str:
-    """Drop the markup characters that survive into rendered-ish text."""
-    return re.sub(r"[`*_]", "", text)
+def closest_match(snippet: str, source: str) -> Diagnosis | None:
+    """Find the passage of ``source`` that best matches ``snippet``.
 
-
-def describe_difference(snippet: str, candidate: str) -> list[str]:
-    """Render a word-level diff of the snippet against the found passage.
-
-    ``-`` is what the citation claims; ``+`` is what the source says.
+    Returns None when nothing is close enough to be worth showing. Saying
+    nothing beats inventing a diagnosis for a quote that was never there.
     """
-    expected = _normalize_ws(snippet).split()
-    actual = _normalize_ws(candidate).split()
+    snippet_words = _words(snippet)
+    source_words = _words(source)
+    if not snippet_words or not source_words:
+        return None
 
-    matcher = SequenceMatcher(None, expected, actual, autojunk=False)
-    opcodes = matcher.get_opcodes()
+    typographic = _typographic_difference(snippet_words, source_words)
+    if typographic is not None:
+        kind, found = typographic
+        return Diagnosis(source_text=" ".join(found), ratio=1.0, kind=kind)
 
-    # The passage carries context on either side of the cited span. Words
-    # the source has *around* the quote are not a discrepancy in it, so
-    # drop a leading and trailing run of pure insertions.
-    while opcodes and opcodes[0][0] == "insert":
-        opcodes = opcodes[1:]
-    while opcodes and opcodes[-1][0] == "insert":
-        opcodes = opcodes[:-1]
+    best = _best_window(snippet_words, source_words)
+    if best is None:
+        return None
+
+    missing, extra = _word_delta(snippet_words, best)
+    return Diagnosis(
+        source_text=" ".join(best),
+        ratio=_ratio(snippet_words, best),
+        missing=missing,
+        extra=extra,
+    )
+
+
+def _ratio(snippet: list[str], window: list[str]) -> float:
+    return SequenceMatcher(None, _keys(snippet), _keys(window)).ratio()
+
+
+def _keys(words: list[str]) -> list[str]:
+    """Compare words by what they say, not by how they are punctuated."""
+    return [_fold_all(w) for w in words]
+
+
+def _best_window(snippet: list[str], source: list[str]) -> list[str] | None:
+    """Scan the source for the run of words closest to the snippet.
+
+    ``quick_ratio`` is an upper bound on ``ratio`` and far cheaper, so it
+    screens every window and only the best few are scored properly.
+    """
+    width = len(snippet)
+    step = max(1, width // 4)
+
+    matcher = SequenceMatcher(autojunk=False)
+    matcher.set_seq2(_keys(snippet))
+
+    scored: list[tuple[float, int]] = []
+    for start in range(0, max(1, len(source) - width + 1), step):
+        window = source[start:start + width]
+        matcher.set_seq1(_keys(window))
+        scored.append((matcher.quick_ratio(), start))
+
+    scored.sort(key=lambda pair: -pair[0])
+
+    # Windows are cut at fixed offsets, so the passage almost never sits
+    # neatly inside one — and the source's version of the quote may simply
+    # be longer than the quote (that is the commonest failure: something was
+    # left out). Pad generously, then trim back to what actually matched, so
+    # a word falling outside a cut is never reported missing from the source.
+    pad = max(4, width // 2)
+
+    # Score the padded window, not the trimmed quote. Trimming cuts away
+    # whatever failed to match, so a short span that matches a fragment of
+    # the snippet would score higher than the longer passage that is
+    # actually the source's version of it.
+    best: list[str] | None = None
+    best_ratio = 0.0
+    for _, start in scored[:5]:
+        window = source[max(0, start - pad):start + width + pad]
+        ratio = _ratio(snippet, window)
+        if ratio > best_ratio:
+            best, best_ratio = window, ratio
+
+    if best is None:
+        return None
+
+    quote = _trim_to_quote(snippet, best)
+    if _ratio(snippet, quote) < MIN_SIMILARITY:
+        return None
+    return quote
+
+
+def _trim_to_quote(snippet: list[str], window: list[str]) -> list[str]:
+    """Cut the surrounding context back off the passage.
+
+    The window is deliberately padded so the whole quote lands inside it.
+    That padding did its job during matching; showing it would just make
+    the reader hunt for where the quote actually starts.
+    """
+    matcher = SequenceMatcher(None, _keys(snippet), _keys(window),
+                              autojunk=False)
+    blocks = [b for b in matcher.get_matching_blocks() if b.size]
+    if not blocks:
+        return window
+
+    start = blocks[0].b
+    end = blocks[-1].b + blocks[-1].size
+    return window[start:end]
+
+
+def _word_delta(snippet: list[str],
+                window: list[str]) -> tuple[list[str], list[str]]:
+    """Which words the citation and the passage disagree about.
+
+    Compared by their folded form, so a word the source merely punctuates
+    differently is not reported as absent from it — the citation says
+    ``URI`` and the source says ``URI.``; the word is there.
+    """
+    matcher = SequenceMatcher(None, _keys(snippet), _keys(window),
+                              autojunk=False)
 
     missing = []
     extra = []
-    for tag, i1, i2, j1, j2 in opcodes:
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag in ("replace", "delete"):
-            missing.extend(expected[i1:i2])
+            missing.extend(snippet[i1:i2])
         if tag in ("replace", "insert"):
-            extra.extend(actual[j1:j2])
+            extra.extend(window[j1:j2])
+    return missing, extra
 
-    lines = [f"  - {' '.join(expected)}", f"  + {' '.join(actual)}"]
-    if missing:
-        lines.append(f"    missing from source: {' '.join(missing)}")
-    if extra:
-        lines.append(f"    present in source:   {' '.join(extra)}")
+
+def _elide(text: str) -> str:
+    """Cut a passage to a readable length. Rendering only — the diagnosis
+    keeps the whole passage, so a machine-readable report gets all of it."""
+    words = text.split()
+    if len(words) <= MAX_RENDERED_WORDS:
+        return text
+    return " ".join(words[:MAX_RENDERED_WORDS]) + " ..."
+
+
+def render(diagnosis: Diagnosis) -> list[str]:
+    """Render a diagnosis as report lines."""
+    where = diagnosis.where
+    location = f", {where}" if where else ""
+
+    if diagnosis.kind:
+        # The words are right; only the writing is wrong. A word diff would
+        # relist the whole sentence, so show what to paste instead.
+        return [
+            f"snippet {diagnosis.kind}{location}",
+            f"  source says: {_elide(diagnosis.source_text)}",
+        ]
+
+    lines = [f"closest match ({diagnosis.percent}% similar{location})",
+             f"  source says: {_elide(diagnosis.source_text)}"]
+    if diagnosis.missing:
+        lines.append(
+            f"  not in the source: {_elide(' '.join(diagnosis.missing))}")
+    if diagnosis.extra:
+        lines.append(
+            f"  the source also has: {_elide(' '.join(diagnosis.extra))}")
     return lines
+
+
+def diagnose(snippet: str, source: str, where: str = "") -> Diagnosis | None:
+    """Diagnose a failed snippet. None when nothing in the source is close.
+
+    ``where`` names the region searched (a section selector), when known.
+    """
+    diagnosis = closest_match(snippet, source)
+    if diagnosis is not None:
+        diagnosis.where = where
+    return diagnosis
 
 
 def explain_snippet_failure(snippet: str, source: str,
                             where: str = "") -> list[str]:
-    """Explain a failed snippet, as report lines. Empty if nothing is close.
-
-    ``where`` names the region searched (a section selector), when known.
-    """
-    match = closest_match(snippet, source)
-    if match is None:
+    """Explain a failed snippet, as report lines. Empty if nothing is close."""
+    diagnosis = diagnose(snippet, source, where)
+    if diagnosis is None:
         return []
-
-    location = f", {where}" if where else ""
-
-    if match.kind:
-        # The words are right; only the typography is wrong. A word diff
-        # would just relist the whole sentence, so show what to paste.
-        return [
-            f"snippet {match.kind}{location}",
-            f"  source says: {match.text}",
-        ]
-
-    return [
-        f"closest match ({match.percent}% similar{location})",
-        *describe_difference(snippet, match.text),
-    ]
+    return render(diagnosis)

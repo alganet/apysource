@@ -56,10 +56,13 @@ apysource fetches the page (caching it on disk), finds the section by name, and 
   apysource Verification Report
 ======================================================================
 
-  [PASS] Fragments: cache resolution.................. 2/2
-  [PASS] Fragments: content extraction................ 2/2
-  [PASS] Fragments: source urls....................... 2/2
-  [PASS] Fragments: snippet verified.................. 2/2
+  [PASS] Fragments: cache resolution............. 2/2
+
+  [PASS] Fragments: content extraction........... 2/2
+
+  [PASS] Fragments: snippet verified............. 2/2
+
+  [PASS] Source URLs............................. 1/1
 
   ======================================================================
   Summary: 4 PASS, 0 FAIL, 0 WARN
@@ -67,11 +70,27 @@ apysource fetches the page (caching it on disk), finds the section by name, and 
   ======================================================================
 ```
 
-`source urls` reports citations whose URL has **moved**. Redirects are
-followed, so such a source still verifies — against whatever it was
-forwarded to, which quietly turns "this URL says X" into "wherever this URL
-leads says X". A moved source warns (exit 0) and names its new home; pass
-`--strict-redirects` to fail on it instead.
+`Source URLs` counts *URLs*, not fragments — the two fragments above cite one
+document. It reports a citation whose URL has **moved**: redirects are
+followed, so such a source still verifies, against whatever it was forwarded
+to, which quietly turns "this URL says X" into "wherever this URL leads says
+X". A moved source warns (exit 0) and names its new home; `--strict-redirects`
+fails on it instead.
+
+It also reports a URL whose destination it has **no record of** — a page cached
+before apysource tracked this. That is not the same as a clean URL, and it is
+not reported as one: run `--refresh` to find out which it is.
+
+When a snippet fails, apysource shows the passage the source actually contains:
+
+```
+  [FAIL] Fragments: snippet verified............. 1/2
+         urn:apysource:fragment_rfc_9110_method_safe/ (1)
+           ...: snippet not found in extracted content
+             snippet differs only in punctuation, § 9.2.1
+               source says: Request methods are considered "safe" if their
+               defined semantics are essentially read-only;
+```
 
 ### 3. Discover
 

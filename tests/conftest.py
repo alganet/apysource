@@ -45,18 +45,24 @@ class MockFetcher:
         return response
 
     def redirect_for(self, url):
-        """Where a URL landed. Pass ``redirects={url: final_url}`` to move one.
+        """Where a URL landed, as the real fetcher would report it.
 
-        An unmapped URL reports a direct fetch; ``None`` (an unrecorded
-        destination) is what a real fetcher returns for a body cached before
-        redirects were tracked, so tests that need that case map to None.
+        A real fetcher only knows a destination for a URL it actually
+        fetched; anything else is unknown (None). Faithfully reproducing
+        that matters: a mock that calls every URL clean would let a check
+        pass on evidence that does not exist in production.
+
+        Pass ``redirects={url: final_url}`` to move one, or
+        ``{url: None}`` to make it unknown despite having been fetched.
         """
         if url in self.redirects:
             final = self.redirects[url]
             if final is None:
                 return None
             return Redirect(url=url, final_url=final, chain=[(301, url)])
-        return Redirect(url=url, final_url=url)
+        if url in self.calls:
+            return Redirect(url=url, final_url=url)
+        return None
 
 
 def build_chain_graph(frag_uri, source_uri, url, location="lines:1-5",

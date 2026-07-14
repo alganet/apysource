@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: ISC
 
-"""Structured result types for resolution and verification."""
+"""Structured result types for fetching, resolution and verification."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apysource.diagnostics import Diagnosis
     from apysource.http import CachedFetcher
     from apysource.repos._base import BaseRepo
 
@@ -77,13 +78,15 @@ class Failure:
     """A single verification failure.
 
     ``hint`` carries the diagnosis when there is one — the passage the
-    source actually contains, and how it differs from what was cited.
+    source actually contains, and how it differs from what was cited. It
+    is kept as data, not as rendered lines, so a machine-readable report
+    can serve it without parsing prose back apart.
     """
 
     group: str
     item: str
     reason: str
-    hint: list[str] = field(default_factory=list)
+    hint: Diagnosis | None = None
 
 
 @dataclass

@@ -59,9 +59,26 @@ def normalize_mime_type(value: str) -> str:
     return MIME_ALIASES.get(value, value)
 
 
-def _normalize(text: str) -> str:
+#: How a truncated extraction announces what it left out. Defined next to
+#: the code that writes it, so the code that has to recognize it cannot
+#: drift from the code that emits it.
+TRUNCATION_MARKER = re.compile(r"\n?\.\.\. \[\d+ more chars\]\s*$")
+
+
+def truncate(text: str, max_chars: int) -> str:
+    """Cut text to length, saying how much was left behind."""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"\n... [{len(text) - max_chars} more chars]"
+
+
+def normalize_ws(text: str) -> str:
     """Collapse whitespace for fuzzy matching."""
     return re.sub(r"\s+", " ", text).strip()
+
+
+#: Long-standing private alias; `normalize_ws` is the public name.
+_normalize = normalize_ws
 
 
 class HtmlFormat:

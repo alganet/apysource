@@ -10,6 +10,7 @@ from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import PROV, RDF
 
 from apysource.namespaces import OA, SCHEMA, SV
+from apysource.diagnostics import Diagnosis
 from apysource.results import CheckResult, Failure, FetcherResult, RepoResult
 from apysource.verification import print_report, run_checks, strip_headers
 
@@ -76,8 +77,9 @@ def test_chain_mode_resolvable():
          patch("apysource.verification.get_text", return_value=long_text):
         results = run_checks(g, checks_config, EMPTY_REGISTRY)
 
-    # Chain mode: cache resolution, extraction, source urls, snippet
-    assert len(results) == 4
+    # Chain mode: cache resolution, extraction, snippet verified.
+    # No Source URLs check: this source is repo-resolved, not fetched.
+    assert len(results) == 3
     # Cache resolution should pass
     check = results[0]
     assert "cache resolution" in check.name
@@ -108,7 +110,7 @@ def test_chain_mode_unresolvable():
          patch("apysource.verification.get_text", return_value=""):
         results = run_checks(g, checks_config, EMPTY_REGISTRY)
 
-    assert len(results) == 4
+    assert len(results) == 3
     check = results[0]
     assert "cache resolution" in check.name
     assert check.ok == 0
@@ -139,8 +141,9 @@ def test_direct_mode_resolvable():
          patch("apysource.verification.get_text", return_value=long_text):
         results = run_checks(g, checks_config, EMPTY_REGISTRY)
 
-    # Direct mode: the check itself, plus the source-url redirect check
-    assert len(results) == 2
+    # Direct mode: just the check. The source is repo-resolved, so there
+    # are no fetched URLs to report on.
+    assert len(results) == 1
     check = results[0]
     assert check.ok == 1
     assert check.failures == []
@@ -294,12 +297,19 @@ def test_print_report_all_pass(capsys):
     assert fail_count == 0
 
 
+
 # ── Redirects (B1) ───────────────────────────────────────────────────────
 
-def _run_redirect_check(url, redirects, *, strict=False):
-    """Run chain checks over one HTTP-resolved source, return 'source urls'."""
+def _redirect_run(url, redirects, *, strict=False, fetched=True):
+    """Run chain checks over one HTTP-resolved source, return 'Source URLs'.
+
+    ``fetched=False`` leaves the URL unfetched, which is what a body cached
+    before redirects were recorded looks like: destination unknown.
+    """
     g, _frag = _make_chain_graph()
     fetcher = MockFetcher(redirects=redirects)
+    if fetched:
+        fetcher.get(url)
     resolved = FetcherResult(
         status="resolved", label="test fragment", source="test source",
         url=url, fetcher=fetcher, format_name="html",
@@ -309,33 +319,43 @@ def _run_redirect_check(url, redirects, *, strict=False):
          patch("apysource.verification.get_text", return_value="x" * 100):
         results = run_checks(g, checks_config, EMPTY_REGISTRY,
                              strict_redirects=strict)
-    return next(c for c in results if "source urls" in c.name)
+    return next(c for c in results if c.name == "Source URLs")
 
 
-def test_direct_url_passes_with_no_warning():
-    check = _run_redirect_check("http://example.com/page", {})
-    assert check.ok == 1
-    assert check.total == 1
-    assert check.warnings == []
-    assert check.failures == []
+def test_a_url_that_answered_for_itself_passes():
+    check = _redirect_run("http://example.com/page", {})
+    assert (check.ok, check.total) == (1, 1)
+    assert check.warnings == [] and check.failures == []
 
 
-def test_redirected_url_warns_but_does_not_fail():
-    """A moved source still verifies -- but silently, which is the bug."""
-    check = _run_redirect_check(
+def test_a_moved_url_warns_but_does_not_fail():
+    """A moved source still verifies — silently, which is the bug."""
+    check = _redirect_run(
         "http://old.example.com/page",
         {"http://old.example.com/page": "http://new.example.com/page"},
     )
-    assert check.ok == 0
-    assert check.total == 1
+    assert (check.ok, check.total) == (0, 1)
     assert check.failures == []
-    assert len(check.warnings) == 1
     assert "http://new.example.com/page" in check.warnings[0].reason
-    assert "consider updating url:" in check.warnings[0].reason
 
 
-def test_strict_redirects_turns_the_warning_into_a_failure():
-    check = _run_redirect_check(
+def test_an_unrecorded_destination_is_reported_not_skipped():
+    """The bug this test used to enshrine.
+
+    A body cached before any of this existed proves nothing about its URL.
+    Dropping it from the tally rendered a warm cache as a confident green —
+    the very silent pass the check exists to end, moved one level up.
+    """
+    check = _redirect_run("http://old.example.com/page", {}, fetched=False)
+
+    assert check.total == 1
+    assert check.ok == 0
+    assert len(check.warnings) == 1
+    assert "--refresh" in check.warnings[0].reason
+
+
+def test_strict_redirects_fails_on_a_move():
+    check = _redirect_run(
         "http://old.example.com/page",
         {"http://old.example.com/page": "http://new.example.com/page"},
         strict=True,
@@ -345,19 +365,20 @@ def test_strict_redirects_turns_the_warning_into_a_failure():
     assert print_report([check]) == 1
 
 
-def test_unknown_destination_is_not_counted_as_clean():
-    """A body cached before redirects were recorded proves nothing."""
-    check = _run_redirect_check(
-        "http://old.example.com/page",
-        {"http://old.example.com/page": None},
-    )
-    assert check.total == 0
-    assert check.warnings == []
-    assert check.failures == []
+def test_strict_redirects_fails_on_an_unknown_destination():
+    """"I have no evidence this URL is clean" is not a pass."""
+    check = _redirect_run("http://old.example.com/page", {}, strict=True,
+                          fetched=False)
+    assert len(check.failures) == 1
+    assert print_report([check]) == 1
 
 
-def test_repo_resolved_sources_are_not_checked_for_redirects():
-    """A repo resolves its own canonical location; its APIs redirect by design."""
+def test_repo_resolved_sources_have_no_url_check():
+    """A repo resolves its own canonical location; its APIs redirect by design.
+
+    With no fetched URLs at all, the check is not emitted — an empty 0/0 line
+    would say nothing.
+    """
     g, _frag = _make_chain_graph()
     resolved = RepoResult(
         status="resolved", label="test", location="lines:1-5",
@@ -369,15 +390,37 @@ def test_repo_resolved_sources_are_not_checked_for_redirects():
          patch("apysource.verification.get_text", return_value="x" * 100):
         results = run_checks(g, checks_config, EMPTY_REGISTRY)
 
-    check = next(c for c in results if "source urls" in c.name)
-    assert check.total == 0
+    assert [c for c in results if c.name == "Source URLs"] == []
+
+
+def test_the_url_check_is_emitted_once_for_the_whole_run():
+    """A URL is one URL, whichever mode cited it and however many times."""
+    g, _frag = _make_chain_graph()
+    fetcher = MockFetcher()
+    fetcher.get("http://example.com/page")
+    resolved = FetcherResult(
+        status="resolved", label="f", source="s",
+        url="http://example.com/page", fetcher=fetcher, format_name="html",
+    )
+    checks_config = [
+        {"name": "Fragments", "class_uri": SV.Fragment, "mode": "chain"},
+        {"name": "Terms", "class_uri": SV.Term, "mode": "direct"},
+    ]
+    with patch("apysource.verification.resolve_chain", return_value=resolved), \
+         patch("apysource.verification.resolve_direct", return_value=resolved), \
+         patch("apysource.verification.get_text", return_value="x" * 100):
+        results = run_checks(g, checks_config, EMPTY_REGISTRY)
+
+    url_checks = [c for c in results if c.name == "Source URLs"]
+    assert len(url_checks) == 1
+    assert url_checks[0].total == 1
 
 
 def test_report_tags_a_warned_check_and_counts_it(capsys):
     checks = [
         CheckResult("clean", 1, 1, []),
         CheckResult("moved", 0, 1, [],
-                    [Failure("src", "http://old/", "fetched via 301 -> http://new/")]),
+                    [Failure("src", "http://old/", "moved: 301 -> http://new/")]),
     ]
     fail_count = print_report(checks)
     out = capsys.readouterr().out
@@ -404,18 +447,18 @@ def test_snippet_failure_names_what_the_citation_dropped():
                 "request messages.")
     check = _run_snippet_check(misquote, RFC_9112)
 
-    assert len(check.failures) == 1
-    hint = "\n".join(check.failures[0].hint)
-    assert "closest match" in hint
-    assert "(Section 7.2 of [HTTP])" in hint
+    hint = check.failures[0].hint
+    assert hint is not None
+    assert " ".join(hint.extra) == "(Section 7.2 of [HTTP])"
+    assert hint.missing == []
 
 
 def test_snippet_failure_calls_out_a_case_difference():
     check = _run_snippet_check(RFC_9112.lower(), RFC_9112)
 
-    hint = "\n".join(check.failures[0].hint)
-    assert "differs only in case" in hint
-    assert "source says:" in hint
+    hint = check.failures[0].hint
+    assert hint.kind == "differs only in case"
+    assert hint.source_text == RFC_9112
 
 
 def test_snippet_failure_with_nothing_close_carries_no_hint():
@@ -424,14 +467,16 @@ def test_snippet_failure_with_nothing_close_carries_no_hint():
         "Entirely unrelated wording about marmalade and bicycles",
         RFC_9112,
     )
-    assert check.failures[0].hint == []
+    assert check.failures[0].hint is None
 
 
 def test_report_prints_the_hint_under_its_failure(capsys):
+    diagnosis = Diagnosis(source_text="what the source says", ratio=0.81,
+                          extra=["(Section", "7.2)"])
     checks = [
         CheckResult("snippet", 0, 1, [
             Failure("src", "frag", "snippet not found in extracted content",
-                    ["closest match (81% similar)", "  - cited", "  + actual"]),
+                    diagnosis),
         ]),
     ]
     print_report(checks)
@@ -439,4 +484,4 @@ def test_report_prints_the_hint_under_its_failure(capsys):
 
     assert "snippet not found in extracted content" in out
     assert "closest match (81% similar)" in out
-    assert "+ actual" in out
+    assert "the source also has: (Section 7.2)" in out

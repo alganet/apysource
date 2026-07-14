@@ -80,24 +80,42 @@ class CachedFetcher:
             logger.warning("unreadable redirect metadata for %s: %s", url, e)
             return None
 
+        # The sidecar names the URL it was written for. A cache directory
+        # that was copied or merged can hold a file that does not answer the
+        # question asked; say "unknown" rather than answer confidently wrong.
+        if info.url != url:
+            logger.warning("redirect metadata for %s names %s", url, info.url)
+            return None
+
         self._redirects[url] = info
         return info
 
     def _record_redirect(self, url: str, resp: requests.Response) -> None:
-        """Persist where a fetch landed, alongside its cached body."""
+        """Persist where a fetch landed, alongside its cached body.
+
+        The memo is only set once the sidecar is on disk. Remembering a
+        destination this process failed to persist would report a URL as
+        checked for the rest of the run and as unknown ever after.
+        """
         info = Redirect(
             url=url,
             final_url=resp.url,
             chain=[(r.status_code, r.url) for r in resp.history],
         )
-        self._redirects[url] = info
-
         payload = {"url": info.url, "final_url": info.final_url,
                    "chain": [list(hop) for hop in info.chain]}
+
         meta = self._meta_path(url)
         tmp = meta.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload))
-        tmp.rename(meta)
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(payload))
+            tmp.rename(meta)
+        except OSError as e:
+            logger.warning("could not record redirect for %s: %s", url, e)
+            return
+
+        self._redirects[url] = info
 
     def get(self, url: str, *, force: bool = False, from_cache: bool = False,
             delay: float | None = None, timeout: int | None = None,
@@ -152,6 +170,13 @@ class CachedFetcher:
                                 timeout=actual_timeout, verify=verify)
             resp.raise_for_status()
         except requests.RequestException as e:
+            # A moved source whose new home is dead is the case that matters
+            # most, and the response carries the chain that explains it. Keep
+            # the destination even though there is no body to cache, so the
+            # report can say "moved, and the move led nowhere" instead of a
+            # bare "could not fetch".
+            if e.response is not None:
+                self._record_redirect(url, e.response)
             logger.error("fetching %s: %s", url, e)
             return None
 
