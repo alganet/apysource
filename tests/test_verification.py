@@ -11,7 +11,15 @@ from rdflib.namespace import PROV, RDF
 
 from apysource.namespaces import OA, SCHEMA, SV
 from apysource.diagnostics import Diagnosis
-from apysource.results import CheckResult, Failure, FetcherResult, RepoResult
+from apysource.repos import RepoRegistry
+from apysource.repos._base import BaseRepo, RepoNotFound, RepoUnavailable
+from apysource.results import (
+    CheckResult,
+    Failure,
+    FetcherResult,
+    RepoResult,
+    TextOutcome,
+)
 from apysource.verification import print_report, run_checks, strip_headers
 
 from tests.conftest import EMPTY_REGISTRY, MockFetcher, build_chain_graph
@@ -74,7 +82,7 @@ def test_chain_mode_resolvable():
     ]
 
     with patch("apysource.verification.resolve_chain", return_value=resolved_result), \
-         patch("apysource.verification.get_text", return_value=long_text):
+         patch("apysource.verification.load_text", return_value=TextOutcome(long_text)):
         results = run_checks(g, checks_config, EMPTY_REGISTRY)
 
     # Chain mode: cache resolution, extraction, snippet verified.
@@ -107,7 +115,7 @@ def test_chain_mode_unresolvable():
     ]
 
     with patch("apysource.verification.resolve_chain", return_value=unresolved_result), \
-         patch("apysource.verification.get_text", return_value=""):
+         patch("apysource.verification.load_text", return_value=TextOutcome("")):
         results = run_checks(g, checks_config, EMPTY_REGISTRY)
 
     assert len(results) == 3
@@ -138,7 +146,7 @@ def test_direct_mode_resolvable():
     ]
 
     with patch("apysource.verification.resolve_direct", return_value=resolved_result), \
-         patch("apysource.verification.get_text", return_value=long_text):
+         patch("apysource.verification.load_text", return_value=TextOutcome(long_text)):
         results = run_checks(g, checks_config, EMPTY_REGISTRY)
 
     # Direct mode: just the check. The source is repo-resolved, so there
@@ -172,7 +180,7 @@ def _run_snippet_check(snippet_text, source_text):
     )
     checks_config = [{"name": "F", "class_uri": SV.Fragment, "mode": "chain"}]
     with patch("apysource.verification.resolve_chain", return_value=resolved), \
-         patch("apysource.verification.get_text", return_value=source_text):
+         patch("apysource.verification.load_text", return_value=TextOutcome(source_text)):
         results = run_checks(g, checks_config, EMPTY_REGISTRY)
     return next(c for c in results if "snippet verified" in c.name)
 
@@ -245,7 +253,7 @@ def test_emit_provenance_returns_graph(capsys):
     ]
 
     with patch("apysource.verification.resolve_chain", return_value=resolved_result), \
-         patch("apysource.verification.get_text", return_value=long_text):
+         patch("apysource.verification.load_text", return_value=TextOutcome(long_text)):
         result = run_checks(g, checks_config, EMPTY_REGISTRY,
                             emit_provenance=True)
 
@@ -316,7 +324,7 @@ def _redirect_run(url, redirects, *, strict=False, fetched=True):
     )
     checks_config = [{"name": "F", "class_uri": SV.Fragment, "mode": "chain"}]
     with patch("apysource.verification.resolve_chain", return_value=resolved), \
-         patch("apysource.verification.get_text", return_value="x" * 100):
+         patch("apysource.verification.load_text", return_value=TextOutcome("x" * 100)):
         results = run_checks(g, checks_config, EMPTY_REGISTRY,
                              strict_redirects=strict)
     return next(c for c in results if c.name == "Source URLs")
@@ -387,7 +395,7 @@ def test_repo_resolved_sources_have_no_url_check():
     )
     checks_config = [{"name": "F", "class_uri": SV.Fragment, "mode": "chain"}]
     with patch("apysource.verification.resolve_chain", return_value=resolved), \
-         patch("apysource.verification.get_text", return_value="x" * 100):
+         patch("apysource.verification.load_text", return_value=TextOutcome("x" * 100)):
         results = run_checks(g, checks_config, EMPTY_REGISTRY)
 
     assert [c for c in results if c.name == "Source URLs"] == []
@@ -408,7 +416,7 @@ def test_the_url_check_is_emitted_once_for_the_whole_run():
     ]
     with patch("apysource.verification.resolve_chain", return_value=resolved), \
          patch("apysource.verification.resolve_direct", return_value=resolved), \
-         patch("apysource.verification.get_text", return_value="x" * 100):
+         patch("apysource.verification.load_text", return_value=TextOutcome("x" * 100)):
         results = run_checks(g, checks_config, EMPTY_REGISTRY)
 
     url_checks = [c for c in results if c.name == "Source URLs"]
@@ -485,3 +493,146 @@ def test_report_prints_the_hint_under_its_failure(capsys):
     assert "snippet not found in extracted content" in out
     assert "closest match (81% similar)" in out
     assert "the source also has: (Section 7.2)" in out
+
+
+# ── Repo documents (B4/B5) ───────────────────────────────────────────────
+#
+# These run end to end: real registry, real resolution, real crawl. Patching
+# the text out would skip the very code under test — the crawl, and what it
+# does when the document is not there.
+
+class _ScriptedRepo(BaseRepo):
+    NAME = "scripted"
+    supports_crawl = True
+
+    def __init__(self, tmp_path, outcome="ok"):
+        super().__init__(cache_dir=tmp_path, url_pattern=r"example\.com",
+                         base_url="https://example.com")
+        self.outcome = outcome
+
+    def url_to_key(self, url):
+        return "doc"
+
+    def resolve_location(self, loc, key):
+        p = self.cache_dir / f"{key}.txt"
+        return p if p.exists() else None
+
+    def extract_content(self, loc, path):
+        return path.read_text()
+
+    def crawl(self, key, *, delay=None, force=False, from_cache=False):
+        if self.outcome == "not_found":
+            raise RepoNotFound(self.NAME, key, "404")
+        if self.outcome == "unavailable":
+            raise RepoUnavailable(self.NAME, key, "connection reset")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        (self.cache_dir / f"{key}.txt").write_text("the document " * 20)
+
+
+class _NoCrawlerRepo(BaseRepo):
+    NAME = "lazy"
+
+    def url_to_key(self, url):
+        return "doc"
+
+    def resolve_location(self, loc, key):
+        return None
+
+
+def _repo_run(repo, *, strict=False, snippet=None, fetcher=None):
+    """Run the full checks over one repo-claimed source."""
+    frag = URIRef("http://x/frag")
+    g = build_chain_graph(frag, URIRef("http://x/src"),
+                          "https://example.com/page", location="")
+    if snippet is not None:
+        target = next(g.objects(frag, OA.hasTarget))
+        sel = BNode()
+        g.add((target, OA.hasSelector, sel))
+        g.add((sel, RDF.type, OA.TextQuoteSelector))
+        g.add((sel, OA.exact, Literal(snippet)))
+
+    checks_config = [{"name": "Fragments", "class_uri": SV.Fragment, "mode": "chain"}]
+    results = run_checks(g, checks_config, RepoRegistry([repo]),
+                         fetcher=fetcher or MockFetcher(), strict_repos=strict)
+    return {c.name: c for c in results}
+
+
+def test_a_crawled_document_passes_the_repo_check(tmp_path):
+    checks = _repo_run(_ScriptedRepo(tmp_path))
+    repo_check = checks["Repo documents"]
+    assert (repo_check.ok, repo_check.total) == (1, 1)
+    assert repo_check.failures == [] and repo_check.warnings == []
+
+
+def test_a_missing_repo_document_fails_with_its_own_reason(tmp_path):
+    """Not "empty extraction (0 chars)". The page is gone; say that."""
+    checks = _repo_run(_ScriptedRepo(tmp_path, "not_found"))
+
+    repo_check = checks["Repo documents"]
+    assert len(repo_check.failures) == 1
+    assert "has no such document" in repo_check.failures[0].reason
+
+    extraction = checks["Fragments: content extraction"]
+    assert len(extraction.failures) == 1
+    assert "no such document" in extraction.failures[0].reason
+    assert "empty extraction" not in extraction.failures[0].reason
+
+
+def test_a_missing_repo_document_does_not_blame_the_snippet(tmp_path):
+    """The source never arrived, so "snippet not found" would be a lie about it."""
+    checks = _repo_run(_ScriptedRepo(tmp_path, "not_found"),
+                       snippet="a quote that is long enough to be checked")
+    snippets = checks["Fragments: snippet verified"]
+    assert len(snippets.failures) == 1
+    assert "snippet not found" not in snippets.failures[0].reason
+    assert "no such document" in snippets.failures[0].reason
+
+
+def test_a_transient_failure_is_not_reported_as_a_missing_page(tmp_path):
+    checks = _repo_run(_ScriptedRepo(tmp_path, "unavailable"))
+    failures = checks["Repo documents"].failures
+    assert len(failures) == 1
+    assert "could not fetch" in failures[0].reason
+    assert "unknown" in failures[0].reason
+    assert "no such document" not in failures[0].reason
+
+
+def test_a_repo_fallback_warns_but_does_not_fail(tmp_path):
+    """It still verified — against the fetched page, not the repo. Say so."""
+    repo = _NoCrawlerRepo(cache_dir=tmp_path, url_pattern=r"example\.com",
+                          base_url="https://example.com")
+    checks = _repo_run(repo, fetcher=MockFetcher(content="x" * 200))
+
+    repo_check = checks["Repo documents"]
+    assert repo_check.failures == []
+    assert len(repo_check.warnings) == 1
+    assert "lazy claims this URL" in repo_check.warnings[0].reason
+
+
+def test_strict_repos_turns_a_fallback_into_a_failure(tmp_path):
+    repo = _NoCrawlerRepo(cache_dir=tmp_path, url_pattern=r"example\.com",
+                          base_url="https://example.com")
+    checks = _repo_run(repo, strict=True, fetcher=MockFetcher(content="x" * 200))
+    assert len(checks["Repo documents"].failures) == 1
+
+
+def test_the_repo_check_is_silent_when_nothing_had_to_be_crawled(tmp_path):
+    """A warm cache crawls nothing, and nothing is not a pass.
+
+    Reporting "1/1 PASS" for a document this check never looked at is exactly
+    the confident green that made the redirect check inert on a warm cache.
+    """
+    (tmp_path / "doc.txt").write_text("already here " * 20)
+    checks = _repo_run(_ScriptedRepo(tmp_path))
+    assert "Repo documents" not in checks
+
+
+def test_the_repo_check_is_absent_without_repos():
+    """No repos, nothing to say."""
+    g, _frag = _make_chain_graph()
+    checks_config = [{"name": "F", "class_uri": SV.Fragment, "mode": "chain"}]
+    with patch("apysource.verification.load_text",
+               return_value=TextOutcome("x" * 100)):
+        results = run_checks(g, checks_config, EMPTY_REGISTRY,
+                             fetcher=MockFetcher())
+    assert all(c.name != "Repo documents" for c in results)

@@ -5,6 +5,8 @@
 """Tests for CLI commands with injected args (no sys.argv mutation)."""
 
 
+from unittest.mock import patch
+
 import pytest
 from rdflib import URIRef
 from rdflib.namespace import RDF
@@ -238,3 +240,44 @@ def test_locate_notes_a_redirected_url(capsys):
 
     err = capsys.readouterr().err
     assert "redirects to http://new.example.com/page" in err
+
+
+def test_check_sources_accepts_the_repo_flags(capsys):
+    """--strict-repos and --no-crawl reach run_checks rather than being ignored.
+
+    A flag the CLI silently swallows is worse than no flag: the user believes
+    the run was strict, and it was not.
+    """
+    from apysource.cli.check_sources import CheckSourcesCommand
+
+    g = _make_check_graph()
+    ctx = CLIContext(project_root=".", rdf_subdir="rdf",
+                     sources_cache_subdir="data/sources")
+    cmd = CheckSourcesCommand(ctx=ctx, registry=EMPTY_REGISTRY)
+
+    with patch("apysource.cli.check_sources.run_checks",
+               return_value=[]) as run:
+        with pytest.raises(SystemExit):
+            cmd.run(graph=g, args=["--strict-repos", "--no-crawl"])
+
+    kwargs = run.call_args.kwargs
+    assert kwargs["strict_repos"] is True
+    assert kwargs["crawl"] is False
+
+
+def test_check_sources_crawls_by_default(capsys):
+    from apysource.cli.check_sources import CheckSourcesCommand
+
+    g = _make_check_graph()
+    ctx = CLIContext(project_root=".", rdf_subdir="rdf",
+                     sources_cache_subdir="data/sources")
+    cmd = CheckSourcesCommand(ctx=ctx, registry=EMPTY_REGISTRY)
+
+    with patch("apysource.cli.check_sources.run_checks",
+               return_value=[]) as run:
+        with pytest.raises(SystemExit):
+            cmd.run(graph=g, args=[])
+
+    kwargs = run.call_args.kwargs
+    assert kwargs["strict_repos"] is False
+    assert kwargs["crawl"] is True
