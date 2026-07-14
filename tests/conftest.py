@@ -9,6 +9,7 @@ from rdflib.namespace import RDF, RDFS
 
 from apysource.namespaces import OA, SCHEMA, SV
 from apysource.repos import RepoRegistry
+from apysource.results import Redirect
 
 EMPTY_REGISTRY = RepoRegistry([])
 
@@ -24,9 +25,10 @@ class MockFetcher:
     asserting which URLs were requested.
     """
 
-    def __init__(self, content=DEFAULT_HTML, *, routes=None):
+    def __init__(self, content=DEFAULT_HTML, *, routes=None, redirects=None):
         self.content = content
         self.routes = routes or {}
+        self.redirects = redirects or {}
         self.calls = []
 
     def get(self, url, **kwargs):
@@ -41,6 +43,20 @@ class MockFetcher:
         if isinstance(response, str):
             return response.encode("utf-8")
         return response
+
+    def redirect_for(self, url):
+        """Where a URL landed. Pass ``redirects={url: final_url}`` to move one.
+
+        An unmapped URL reports a direct fetch; ``None`` (an unrecorded
+        destination) is what a real fetcher returns for a body cached before
+        redirects were tracked, so tests that need that case map to None.
+        """
+        if url in self.redirects:
+            final = self.redirects[url]
+            if final is None:
+                return None
+            return Redirect(url=url, final_url=final, chain=[(301, url)])
+        return Redirect(url=url, final_url=url)
 
 
 def build_chain_graph(frag_uri, source_uri, url, location="lines:1-5",

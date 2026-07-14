@@ -22,8 +22,9 @@ class CheckSourcesCommand:
 
     Resolves each fragment/term, extracts its cited content, and confirms the
     snippet is present, printing a pass/fail report and exiting non-zero on
-    any failure. Accepts ``--refresh`` (re-fetch, bypassing the HTTP cache)
-    and ``--provenance <file>`` (write a PROV-O graph).
+    any failure. Accepts ``--refresh`` (re-fetch, bypassing the HTTP cache),
+    ``--strict-redirects`` (fail, rather than warn, on a source URL that has
+    moved) and ``--provenance <file>`` (write a PROV-O graph).
     """
 
     #: Opt in to YAML-graph input: ``check`` may take a sources file as its
@@ -43,6 +44,9 @@ class CheckSourcesCommand:
 
         # Parse --refresh flag (re-fetch sources, bypassing the HTTP cache)
         force, args = pop_flag(args, "--refresh")
+
+        # A moved source URL warns by default; --strict-redirects fails on it.
+        strict_redirects, args = pop_flag(args, "--strict-redirects")
 
         # Parse --provenance flag
         prov_path = None
@@ -69,7 +73,7 @@ class CheckSourcesCommand:
         emit_prov = prov_path is not None
         results = run_checks(g, checks_config, self.registry,
                              fetcher=self.fetcher, emit_provenance=emit_prov,
-                             force=force)
+                             force=force, strict_redirects=strict_redirects)
 
         prov_graph = None
         if isinstance(results, tuple):

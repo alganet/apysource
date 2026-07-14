@@ -19,7 +19,7 @@ from apysource.graph import local_name
 from apysource.namespaces import PROV, SV
 from apysource.repos import RepoRegistry
 from apysource.resolution import _get_snippet, get_text, resolve_chain, resolve_direct
-from apysource.results import CheckResult, Failure
+from apysource.results import CheckResult, Failure, FetcherResult
 
 #: Minimum extracted-content length (in characters) to treat as a usable
 #: extraction. Below this, the snippet/extraction check fails rather than
@@ -41,9 +41,61 @@ def strip_headers(text: str) -> str:
     return "\n".join(content).strip()
 
 
+def _redirect_check(name: str, results: list[Any],
+                    strict: bool = False) -> CheckResult:
+    """Report source URLs that were answered by a different URL.
+
+    Only URLs fetched over HTTP are considered: a repo resolves its own
+    canonical location, and its API endpoints redirect by design.
+
+    A URL whose destination is unknown (fetched before redirects were
+    recorded) is left out of the tally entirely rather than counted as
+    clean — claiming a URL is fine on no evidence is the failure mode this
+    check exists to end. ``--refresh`` turns unknowns into knowns.
+    """
+    ok = 0
+    records = []
+    seen: set[str] = set()
+
+    for result in results:
+        if not isinstance(result, FetcherResult) or result.fetcher is None:
+            continue
+        if not result.url or result.url in seen:
+            continue
+
+        # The fetcher is injected and duck-typed; a custom one need not
+        # record redirects at all.
+        redirect_for = getattr(result.fetcher, "redirect_for", None)
+        if redirect_for is None:
+            continue
+
+        info = redirect_for(result.url)
+        if info is None:
+            continue
+
+        seen.add(result.url)
+        if not info.redirected:
+            ok += 1
+            continue
+
+        hops = " -> ".join(str(status) for status, _ in info.chain)
+        records.append(Failure(
+            result.source or "source",
+            result.url,
+            f"fetched via {hops} -> {info.final_url}; "
+            f"consider updating url:",
+        ))
+
+    total = ok + len(records)
+    if strict:
+        return CheckResult(name, ok, total, failures=records)
+    return CheckResult(name, ok, total, warnings=records)
+
+
 def run_checks(
     g: Graph, checks_config: list[dict[str, Any]], registry: RepoRegistry,
     fetcher: Any = None, emit_provenance: bool = False, force: bool = False,
+    strict_redirects: bool = False,
 ) -> list[CheckResult] | tuple[list[CheckResult], Graph]:
     """Run all checks, return structured results.
 
@@ -85,14 +137,17 @@ def run_checks(
             chain_results = _run_chain_checks(g, entities, name, registry,
                                               fetcher=fetcher,
                                               prov_graph=prov_graph,
-                                              activity=activity, force=force)
+                                              activity=activity, force=force,
+                                              strict_redirects=strict_redirects)
             results.extend(chain_results)
 
         elif mode == "direct":
             ok_list = []
             fail_list = []
+            direct_resolved = []
             for entity in entities:
                 result = resolve_direct(g, entity, registry, fetcher=fetcher)
+                direct_resolved.append(result)
                 if result.status != "resolved":
                     loc = str(g.value(entity, SV.sourceLocation) or "")
                     fail_list.append(Failure(local_name(entity), local_name(entity),
@@ -109,6 +164,8 @@ def run_checks(
                                             f'"{loc}" -> empty extraction ({len(clean)} chars)'))
 
             results.append(CheckResult(name, len(ok_list), len(entities), fail_list))
+            results.append(_redirect_check(f"{name}: source urls",
+                                           direct_resolved, strict_redirects))
 
     if emit_provenance and prov_graph is not None and activity is not None:
         now = datetime.now(timezone.utc)
@@ -123,7 +180,7 @@ def _run_chain_checks(
     g: Graph, fragments: list[URIRef], base_name: str,
     registry: RepoRegistry, fetcher: Any = None,
     prov_graph: Graph | None = None, activity: BNode | None = None,
-    force: bool = False,
+    force: bool = False, strict_redirects: bool = False,
 ) -> list[CheckResult]:
     """Run the three chain-mode checks: cache resolution, content extraction,
     and snippet verification."""
@@ -175,6 +232,10 @@ def _run_chain_checks(
     checks.append(CheckResult(f"{base_name}: content extraction",
                               len(extract_ok), len(fragments), extract_fail))
 
+    # Every URL has now been fetched, so the redirect metadata is current.
+    checks.append(_redirect_check(f"{base_name}: source urls",
+                                  list(resolved.values()), strict_redirects))
+
     # CHECK: Snippet verified (reads oa:exact from TextQuoteSelector)
     # Resolve each fragment's snippet once, then keep those long enough to verify.
     snippets = {f: (_get_snippet(g, f) or "") for f in fragments}
@@ -218,6 +279,22 @@ def _run_chain_checks(
     return checks
 
 
+def _print_records(records: list[Failure]) -> None:
+    """Print failures (or warnings) grouped by their source."""
+    if not records:
+        return
+
+    by_group = defaultdict(list)
+    for f in records:
+        by_group[f.group].append(f"{f.item}: {f.reason}")
+
+    for group in sorted(by_group, key=lambda t: -len(by_group[t])):
+        items = by_group[group]
+        print(f"         {group}/ ({len(items)})")
+        for item in items:
+            print(f"           {item}")
+
+
 def print_report(checks: list[CheckResult], summary: bool = False,
                  title: str = "apysource Verification Report") -> int:
     """Print the verification report. Returns failure count."""
@@ -227,34 +304,31 @@ def print_report(checks: list[CheckResult], summary: bool = False,
 
     pass_count = 0
     fail_count = 0
+    warn_count = 0
 
     for check in checks:
         failed = len(check.failures)
 
         if check.total == 0:
             tag = "----"
-        elif failed == 0:
-            tag = "PASS"
-            pass_count += 1
-        else:
+        elif failed:
             tag = "FAIL"
             fail_count += 1
+        elif check.warnings:
+            tag = "WARN"
+            warn_count += 1
+        else:
+            tag = "PASS"
+            pass_count += 1
 
         print(f"\n  [{tag}] {check.name:.<40s} {check.ok}/{check.total}")
 
-        if check.failures and not summary:
-            by_group = defaultdict(list)
-            for f in check.failures:
-                by_group[f.group].append(f"{f.item}: {f.reason}")
-
-            for group in sorted(by_group, key=lambda t: -len(by_group[t])):
-                items = by_group[group]
-                print(f"         {group}/ ({len(items)})")
-                for item in items:
-                    print(f"           {item}")
+        if not summary:
+            _print_records(check.failures)
+            _print_records(check.warnings)
 
     print(f"\n  {'=' * 70}")
-    print(f"  Summary: {pass_count} PASS, {fail_count} FAIL, 0 WARN")
+    print(f"  Summary: {pass_count} PASS, {fail_count} FAIL, {warn_count} WARN")
     if fail_count > 0:
         print("  EXIT CODE: 1 (failures present)")
     else:

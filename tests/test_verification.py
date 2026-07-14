@@ -10,10 +10,10 @@ from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import PROV, RDF
 
 from apysource.namespaces import OA, SCHEMA, SV
-from apysource.results import CheckResult, Failure, RepoResult
+from apysource.results import CheckResult, Failure, FetcherResult, RepoResult
 from apysource.verification import print_report, run_checks, strip_headers
 
-from tests.conftest import EMPTY_REGISTRY, build_chain_graph
+from tests.conftest import EMPTY_REGISTRY, MockFetcher, build_chain_graph
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -76,8 +76,8 @@ def test_chain_mode_resolvable():
          patch("apysource.verification.get_text", return_value=long_text):
         results = run_checks(g, checks_config, EMPTY_REGISTRY)
 
-    # Chain mode produces 3 sub-checks
-    assert len(results) == 3
+    # Chain mode: cache resolution, extraction, source urls, snippet
+    assert len(results) == 4
     # Cache resolution should pass
     check = results[0]
     assert "cache resolution" in check.name
@@ -108,7 +108,7 @@ def test_chain_mode_unresolvable():
          patch("apysource.verification.get_text", return_value=""):
         results = run_checks(g, checks_config, EMPTY_REGISTRY)
 
-    assert len(results) == 3
+    assert len(results) == 4
     check = results[0]
     assert "cache resolution" in check.name
     assert check.ok == 0
@@ -139,7 +139,8 @@ def test_direct_mode_resolvable():
          patch("apysource.verification.get_text", return_value=long_text):
         results = run_checks(g, checks_config, EMPTY_REGISTRY)
 
-    assert len(results) == 1
+    # Direct mode: the check itself, plus the source-url redirect check
+    assert len(results) == 2
     check = results[0]
     assert check.ok == 1
     assert check.failures == []
@@ -291,3 +292,98 @@ def test_print_report_all_pass(capsys):
     ]
     fail_count = print_report(checks)
     assert fail_count == 0
+
+
+# ── Redirects (B1) ───────────────────────────────────────────────────────
+
+def _run_redirect_check(url, redirects, *, strict=False):
+    """Run chain checks over one HTTP-resolved source, return 'source urls'."""
+    g, _frag = _make_chain_graph()
+    fetcher = MockFetcher(redirects=redirects)
+    resolved = FetcherResult(
+        status="resolved", label="test fragment", source="test source",
+        url=url, fetcher=fetcher, format_name="html",
+    )
+    checks_config = [{"name": "F", "class_uri": SV.Fragment, "mode": "chain"}]
+    with patch("apysource.verification.resolve_chain", return_value=resolved), \
+         patch("apysource.verification.get_text", return_value="x" * 100):
+        results = run_checks(g, checks_config, EMPTY_REGISTRY,
+                             strict_redirects=strict)
+    return next(c for c in results if "source urls" in c.name)
+
+
+def test_direct_url_passes_with_no_warning():
+    check = _run_redirect_check("http://example.com/page", {})
+    assert check.ok == 1
+    assert check.total == 1
+    assert check.warnings == []
+    assert check.failures == []
+
+
+def test_redirected_url_warns_but_does_not_fail():
+    """A moved source still verifies -- but silently, which is the bug."""
+    check = _run_redirect_check(
+        "http://old.example.com/page",
+        {"http://old.example.com/page": "http://new.example.com/page"},
+    )
+    assert check.ok == 0
+    assert check.total == 1
+    assert check.failures == []
+    assert len(check.warnings) == 1
+    assert "http://new.example.com/page" in check.warnings[0].reason
+    assert "consider updating url:" in check.warnings[0].reason
+
+
+def test_strict_redirects_turns_the_warning_into_a_failure():
+    check = _run_redirect_check(
+        "http://old.example.com/page",
+        {"http://old.example.com/page": "http://new.example.com/page"},
+        strict=True,
+    )
+    assert check.warnings == []
+    assert len(check.failures) == 1
+    assert print_report([check]) == 1
+
+
+def test_unknown_destination_is_not_counted_as_clean():
+    """A body cached before redirects were recorded proves nothing."""
+    check = _run_redirect_check(
+        "http://old.example.com/page",
+        {"http://old.example.com/page": None},
+    )
+    assert check.total == 0
+    assert check.warnings == []
+    assert check.failures == []
+
+
+def test_repo_resolved_sources_are_not_checked_for_redirects():
+    """A repo resolves its own canonical location; its APIs redirect by design."""
+    g, _frag = _make_chain_graph()
+    resolved = RepoResult(
+        status="resolved", label="test", location="lines:1-5",
+        source="test source", url="http://example.com", module="test",
+        cache_file="/tmp/fake.txt",
+    )
+    checks_config = [{"name": "F", "class_uri": SV.Fragment, "mode": "chain"}]
+    with patch("apysource.verification.resolve_chain", return_value=resolved), \
+         patch("apysource.verification.get_text", return_value="x" * 100):
+        results = run_checks(g, checks_config, EMPTY_REGISTRY)
+
+    check = next(c for c in results if "source urls" in c.name)
+    assert check.total == 0
+
+
+def test_report_tags_a_warned_check_and_counts_it(capsys):
+    checks = [
+        CheckResult("clean", 1, 1, []),
+        CheckResult("moved", 0, 1, [],
+                    [Failure("src", "http://old/", "fetched via 301 -> http://new/")]),
+    ]
+    fail_count = print_report(checks)
+    out = capsys.readouterr().out
+
+    assert fail_count == 0
+    assert "[WARN]" in out
+    assert "1 PASS, 0 FAIL, 1 WARN" in out
+    assert "http://new/" in out
+    assert "EXIT CODE: 0" in out
