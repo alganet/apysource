@@ -15,7 +15,7 @@ from typing import cast
 from rdflib import Graph, URIRef
 from rdflib.namespace import DCTERMS, RDF, RDFS
 
-from apysource.formats import extract_content
+from apysource.formats import extract_content, truncate
 from apysource.http import CachedFetcher
 from apysource.namespaces import OA, SCHEMA, SV
 from apysource.repos import RepoRegistry
@@ -172,9 +172,7 @@ def get_text(result: ResolveResult, max_chars: int = 5000,
         text = extract_content(
             body, result.locator, format_name=result.format_name,
         )
-        if len(text) > max_chars:
-            return text[:max_chars] + f"\n... [{len(text) - max_chars} more chars]"
-        return text
+        return truncate(text, max_chars)
 
     if isinstance(result, RepoResult):
         if not result.cache_file:
@@ -186,8 +184,6 @@ def get_text(result: ResolveResult, max_chars: int = 5000,
             text = result.repo.extract_content(result.location, path)
         else:
             text = path.read_text(encoding="utf-8", errors="replace")
-        if len(text) > max_chars:
-            return text[:max_chars] + f"\n... [{len(text) - max_chars} more chars]"
-        return text
+        return truncate(text, max_chars)
 
     return ""

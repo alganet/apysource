@@ -155,6 +155,11 @@ apysource caches every fetched URL on disk (under `data/cache/` by default), key
 the URL. Cache hits skip both the network and the polite crawl delay, which makes re-runs fast and
 keeps you a courteous crawler.
 
+Alongside each cached body sits a `<hash>.meta.json` sidecar recording where the request actually
+landed — the final URL, and the redirect chain that led there if any. That is what lets `check`
+report a source whose URL has **moved**: redirects are followed, so a stale citation still
+verifies against the page it was forwarded to, and without this the weakening would be invisible.
+
 There is no time-based expiry: **once a URL is cached, that body is reused until you refresh it.**
 For a link-rot checker this is a deliberate trade-off — verification is reproducible, but a source
 that changes upstream won't be noticed until you re-fetch. To force a fresh download, bypassing the
@@ -164,6 +169,15 @@ cache:
 apysource check sources.yaml --refresh     # re-fetch every source, then verify
 apysource locate <url> <snippet> --refresh # re-fetch this URL while locating
 apysource add sources.yaml <url> <snippet> --refresh
+```
+
+A body cached before apysource recorded destinations has no sidecar, so its URL's destination is
+simply **unknown**. `check` says so rather than passing it: an unchecked URL is not a clean one,
+and reporting it as clean is exactly the silent green the `Source URLs` check exists to end. One
+`--refresh` turns every unknown into a known.
+
+```bash
+apysource check sources.yaml --strict-redirects   # a moved (or unchecked) URL fails the run
 ```
 
 The crawler identifies itself with a `User-Agent` derived from the package version

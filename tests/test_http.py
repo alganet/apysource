@@ -4,6 +4,7 @@
 
 """Tests for apysource.http.CachedFetcher."""
 
+from pathlib import Path
 from unittest.mock import patch
 
 import requests
@@ -30,7 +31,9 @@ class _FakeResponse:
 
     def raise_for_status(self):
         if not self._status_ok:
-            raise requests.HTTPError("404 Not Found")
+            # requests attaches the response to the error, and it carries the
+            # redirect chain that led to the dead page.
+            raise requests.HTTPError("404 Not Found", response=self)
 
 
 class TestCacheKey:
@@ -251,5 +254,49 @@ class TestRedirects:
         f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
         f.cache_dir.mkdir(parents=True, exist_ok=True)
         f._meta_path("https://old.example.com/page").write_text("{not json")
+
+        assert f.redirect_for("https://old.example.com/page") is None
+
+    def test_a_redirect_to_a_dead_page_keeps_its_chain(self, tmp_path):
+        """Moved, and the move led nowhere — the case that matters most.
+
+        The response carries the chain that explains the failure, and it was
+        being thrown away with the exception.
+        """
+        gone = _FakeResponse(status_ok=False, url="https://new.example.com/gone",
+                             history=[_FakeRedirect(301, "https://old.example.com/page")])
+        f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+        with patch("apysource.http.requests.get", return_value=gone):
+            assert f.get("https://old.example.com/page") is None
+
+        info = f.redirect_for("https://old.example.com/page")
+        assert info is not None
+        assert info.redirected
+        assert info.final_url == "https://new.example.com/gone"
+
+    def test_a_sidecar_naming_another_url_is_not_trusted(self, tmp_path):
+        """A copied or merged cache dir must not answer confidently wrong."""
+        import json
+
+        f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+        f.cache_dir.mkdir(parents=True, exist_ok=True)
+        f._meta_path("https://a.example.com/").write_text(json.dumps({
+            "url": "https://somewhere-else.example.com/",
+            "final_url": "https://x.example.com/",
+            "chain": [[301, "https://somewhere-else.example.com/"]],
+        }))
+
+        assert f.redirect_for("https://a.example.com/") is None
+
+    def test_an_unpersisted_destination_is_not_remembered(self, tmp_path):
+        """Remembering what we failed to write would report a URL as checked
+        for this run and as unknown ever after."""
+        f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+        resp = _FakeResponse(url="https://new.example.com/page",
+                             history=[_FakeRedirect(301, "https://old.example.com/page")])
+
+        with patch("apysource.http.requests.get", return_value=resp), \
+             patch.object(Path, "write_text", side_effect=OSError("disk full")):
+            f.get("https://old.example.com/page")
 
         assert f.redirect_for("https://old.example.com/page") is None
