@@ -32,6 +32,16 @@ wikisource_base_url = "https://en.wikisource.org"
 wiktionary_url_pattern = "wiktionary\\.org/wiki/(.+)"
 wiktionary_base_url = "https://en.wiktionary.org"
 
+# Only en-US: translations live in mdn/translated-content, and mapping a
+# /fr/docs/ URL into files/fr/ would report every live French page as missing.
+mdn_url_pattern = "developer\\.mozilla\\.org/(?i:en-US)/docs/([^#?\\s]+)"
+# The ref is part of the URL: put a commit SHA where "main" is to pin the text
+# a citation is checked against.
+mdn_base_url = "https://raw.githubusercontent.com/mdn/content/main/files"
+# raw.githubusercontent is a CDN, not a courtesy-bound origin server. Without a
+# per-repo delay, a page set with 60 MDN citations would take three minutes.
+mdn_crawl_delay = 0.5
+
 # ── HTTP client ──────────────────────────────────────────────────────────
 
 ["apysource.http.CachedFetcher http_client"]
@@ -57,12 +67,18 @@ base_url = "{wikisource_base_url}"
 url_pattern = "{wiktionary_url_pattern}"
 base_url = "{wiktionary_base_url}"
 
-# ── Registry (provides shared cache_dir + http_client to repos) ──────────
+["apysource.repos.mdn.MdnRepo repo_mdn"]
+url_pattern = "{mdn_url_pattern}"
+base_url = "{mdn_base_url}"
+crawl_delay = "{mdn_crawl_delay}"
+
+# ── Registry (shared cache_dir, http_client and crawl delay for repos) ───
 
 ["apysource.repos.RepoRegistry registry"]
-repos = ["{repo_archive}", "{repo_gutenberg}", "{repo_wikisource}", "{repo_wiktionary}"]
+repos = ["{repo_archive}", "{repo_gutenberg}", "{repo_mdn}", "{repo_wikisource}", "{repo_wiktionary}"]
 sources_cache_dir = "{sources_cache_subdir}"
 http_client = "{http_client}"
+default_crawl_delay = "{default_crawl_delay}"
 
 # ── CLI ───────────────────────────────────────────────────────────────────
 
