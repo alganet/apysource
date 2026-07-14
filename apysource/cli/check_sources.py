@@ -22,9 +22,11 @@ class CheckSourcesCommand:
 
     Resolves each fragment/term, extracts its cited content, and confirms the
     snippet is present, printing a pass/fail report and exiting non-zero on
-    any failure. Accepts ``--refresh`` (re-fetch, bypassing the HTTP cache),
-    ``--strict-redirects`` (fail, rather than warn, on a source URL that has
-    moved) and ``--provenance <file>`` (write a PROV-O graph).
+    any failure. Accepts ``--refresh`` (re-fetch and re-crawl, bypassing the
+    caches), ``--strict-redirects`` (fail, rather than warn, on a source URL
+    that has moved), ``--strict-repos`` (fail on a repo that claimed a URL but
+    could not serve it), ``--no-crawl`` (never fetch a repo document that is
+    not already cached) and ``--provenance <file>`` (write a PROV-O graph).
     """
 
     #: Opt in to YAML-graph input: ``check`` may take a sources file as its
@@ -47,6 +49,15 @@ class CheckSourcesCommand:
 
         # A moved source URL warns by default; --strict-redirects fails on it.
         strict_redirects, args = pop_flag(args, "--strict-redirects")
+
+        # A repo that claimed a URL but could not serve it warns by default:
+        # the snippet was still checked, but against the fetched page rather
+        # than the repository the citation names. --strict-repos fails on it.
+        strict_repos, args = pop_flag(args, "--strict-repos")
+
+        # --no-crawl refuses to fetch a repo document that is not cached,
+        # reporting the miss instead of quietly fetching a different document.
+        no_crawl, args = pop_flag(args, "--no-crawl")
 
         # Parse --provenance flag
         prov_path = None
@@ -73,7 +84,8 @@ class CheckSourcesCommand:
         emit_prov = prov_path is not None
         results = run_checks(g, checks_config, self.registry,
                              fetcher=self.fetcher, emit_provenance=emit_prov,
-                             force=force, strict_redirects=strict_redirects)
+                             force=force, strict_redirects=strict_redirects,
+                             strict_repos=strict_repos, crawl=not no_crawl)
 
         prov_graph = None
         if isinstance(results, tuple):

@@ -20,8 +20,8 @@ from apysource.formats import normalize_ws
 from apysource.graph import local_name
 from apysource.namespaces import PROV, SV
 from apysource.repos import RepoRegistry
-from apysource.resolution import _get_snippet, get_text, resolve_chain, resolve_direct
-from apysource.results import CheckResult, Failure, FetcherResult
+from apysource.resolution import _get_snippet, load_text, resolve_chain, resolve_direct
+from apysource.results import CheckResult, Failure, FetcherResult, RepoResult
 
 #: Minimum extracted-content length (in characters) to treat as a usable
 #: extraction. Below this, the snippet/extraction check fails rather than
@@ -92,10 +92,89 @@ def _redirect_check(name: str, results: list[Any],
     return CheckResult(name, ok, total, warnings=records)
 
 
+def _repo_check(name: str, results: list[Any], strict: bool = False) -> CheckResult:
+    """Report what the repos could and could not serve.
+
+    Reads what the extraction phase already produced — the crawl outcomes the
+    repos recorded — the way the URL check reads the sidecar the fetch wrote.
+    It performs no I/O and invents no outcome for a document nobody had to
+    crawl.
+
+    A repo that matched a URL but could not serve it is a *warning*, not a
+    pass: the snippet was verified, but against the rendered web page rather
+    than the repository the citation names. That warning depends on the URL
+    pattern and the crawler, never on the cache, so it cannot go quiet on a
+    warm run.
+
+    A warm cache crawls nothing and so has no outcome at all. It contributes
+    neither a pass nor a failure here — counting it ``ok`` would report success
+    for a document this check never looked at, which is the confident green it
+    exists to prevent.
+    """
+    ok = 0
+    records = []
+    seen: set[tuple[str, str]] = set()
+    fallbacks: set[str] = set()
+
+    for result in results:
+        if isinstance(result, RepoResult) and result.repo is not None:
+            crawl_outcome = getattr(result.repo, "crawl_outcome", None)
+            if crawl_outcome is None:
+                continue
+            outcome = crawl_outcome(result.key)
+            if outcome is None:  # never crawled: already cached, nothing to say
+                continue
+
+            ident = (outcome.repo, outcome.key)
+            if ident in seen:
+                continue
+            seen.add(ident)
+
+            if outcome.status == "ok":
+                ok += 1
+            elif outcome.status == "not_found":
+                records.append(Failure(
+                    result.source or outcome.repo, result.url or outcome.key,
+                    f"{outcome.repo} has no such document: {outcome.key}. "
+                    f"The page this cites has moved or been removed; the URL "
+                    f"may still redirect somewhere, but the source does not.",
+                ))
+            else:
+                records.append(Failure(
+                    result.source or outcome.repo, result.url or outcome.key,
+                    f"{outcome.repo} could not fetch {outcome.key}"
+                    + (f": {outcome.reason}" if outcome.reason else "")
+                    + ". Whether the document exists is unknown.",
+                ))
+
+        elif isinstance(result, FetcherResult) and result.fallback_from:
+            if result.url in fallbacks:
+                continue
+            fallbacks.add(result.url)
+            records.append(Failure(
+                result.source or "source", result.url,
+                f"{result.fallback_from} claims this URL but "
+                f"{result.fallback_reason}. The snippet was verified against "
+                f"the fetched page, not against {result.fallback_from}.",
+            ))
+
+    total = ok + len(records)
+    if strict:
+        return CheckResult(name, ok, total, failures=records)
+
+    # A document the repo genuinely does not have is a failure either way: it
+    # is a finding about the source, not a caveat about how it was checked.
+    hard = [f for f in records if " has no such document: " in f.reason
+            or " could not fetch " in f.reason]
+    soft = [f for f in records if f not in hard]
+    return CheckResult(name, ok, total, failures=hard, warnings=soft)
+
+
 def run_checks(
     g: Graph, checks_config: list[dict[str, Any]], registry: RepoRegistry,
     fetcher: Any = None, emit_provenance: bool = False, force: bool = False,
-    strict_redirects: bool = False,
+    strict_redirects: bool = False, strict_repos: bool = False,
+    crawl: bool = True,
 ) -> list[CheckResult] | tuple[list[CheckResult], Graph]:
     """Run all checks, return structured results.
 
@@ -137,7 +216,8 @@ def run_checks(
         elif mode == "chain":
             chain_results, chain_resolved = _run_chain_checks(
                 g, entities, name, registry, fetcher=fetcher,
-                prov_graph=prov_graph, activity=activity, force=force)
+                prov_graph=prov_graph, activity=activity, force=force,
+                crawl=crawl)
             results.extend(chain_results)
             resolved_sources.extend(chain_resolved)
 
@@ -154,14 +234,20 @@ def run_checks(
                                             f'"{loc}" -> {result.status}'))
                     continue
 
-                text = get_text(result, max_chars=50000, force=force)
-                clean = strip_headers(text) if text else ""
+                outcome = load_text(result, max_chars=50000, force=force,
+                                    crawl=crawl)
+                clean = strip_headers(outcome.text) if outcome.text else ""
                 if len(clean) >= 3:
                     ok_list.append(entity)
                 else:
                     loc = str(g.value(entity, SV.sourceLocation) or "")
+                    # Say what actually went wrong. A missing page, a failed
+                    # fetch and a genuinely empty document used to arrive as
+                    # one indistinguishable "empty extraction".
+                    detail = (outcome.reason if outcome.status != "ok"
+                              else f"empty extraction ({len(clean)} chars)")
                     fail_list.append(Failure(local_name(entity), local_name(entity),
-                                            f'"{loc}" -> empty extraction ({len(clean)} chars)'))
+                                            f'"{loc}" -> {detail}'))
 
             results.append(CheckResult(name, len(ok_list), len(entities), fail_list))
             resolved_sources.extend(direct_resolved)
@@ -173,6 +259,10 @@ def run_checks(
                                 strict_redirects)
     if redirects.total:
         results.append(redirects)
+
+    repos = _repo_check("Repo documents", resolved_sources, strict_repos)
+    if repos.total:
+        results.append(repos)
 
     if emit_provenance and prov_graph is not None and activity is not None:
         now = datetime.now(timezone.utc)
@@ -187,7 +277,7 @@ def _run_chain_checks(
     g: Graph, fragments: list[URIRef], base_name: str,
     registry: RepoRegistry, fetcher: Any = None,
     prov_graph: Graph | None = None, activity: BNode | None = None,
-    force: bool = False,
+    force: bool = False, crawl: bool = True,
 ) -> tuple[list[CheckResult], list[Any]]:
     """Run the three chain-mode checks: cache resolution, content extraction,
     and snippet verification.
@@ -227,16 +317,22 @@ def _run_chain_checks(
                                         f'"{loc}" -> no cache'))
             continue
 
-        # Force a refresh (re-fetch) during the extraction phase only; the
-        # snippet phase below reads the now-fresh HTTP cache, so each source
-        # URL is fetched at most once per run.
-        text = get_text(result, max_chars=50000, force=force)
-        clean = strip_headers(text)
+        # Force a refresh (re-fetch, and re-crawl) during the extraction phase
+        # only; the snippet phase below reads the now-fresh caches, so each
+        # source is fetched at most once per run.
+        outcome = load_text(result, max_chars=50000, force=force, crawl=crawl)
+        clean = strip_headers(outcome.text)
 
         if len(clean) < MIN_EXTRACT_CHARS:
             loc = str(g.value(frag, SV.sourceLocation) or "")
+            # A page the repo does not have, a fetch that failed, and a
+            # document that really is empty are three different findings.
+            # Reporting all three as "empty extraction" blamed the citation
+            # for things the citation had nothing to do with.
+            detail = (outcome.reason if outcome.status != "ok"
+                      else f"empty extraction ({len(clean)} chars)")
             extract_fail.append(Failure(local_name(frag), local_name(frag),
-                                        f'"{loc}" -> empty extraction ({len(clean)} chars)'))
+                                        f'"{loc}" -> {detail}'))
         else:
             extract_ok.append(frag)
 
@@ -265,8 +361,20 @@ def _run_chain_checks(
                                         "cache not resolved for verification"))
             continue
 
-        source_text = get_text(result, max_chars=100000)
-        norm_source = normalize_ws(source_text)
+        # No force here: the extraction phase above already refreshed and
+        # re-crawled, so this reads the warm cache.
+        loaded = load_text(result, max_chars=100000, crawl=crawl)
+        if loaded.status != "ok":
+            # The source never arrived. Running the snippet against the empty
+            # string would report "snippet not found" — blaming the quote for
+            # a page that was missing or a fetch that failed.
+            snippet_fail.append(Failure(local_name(frag), local_name(frag),
+                                        loaded.reason or "source unavailable"))
+            if prov_graph is not None:
+                prov_graph.add((frag, SV.verificationStatus, Literal("failed")))
+            continue
+
+        norm_source = normalize_ws(loaded.text)
 
         if norm_snippet and norm_snippet in norm_source:
             snippet_ok.append(frag)
