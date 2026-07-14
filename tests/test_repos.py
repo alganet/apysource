@@ -49,6 +49,29 @@ def test_all_repos():
     assert repos[1].NAME == "gutenberg"
 
 
+def test_registry_fills_crawl_delay_from_its_default(tmp_path):
+    """A repo with no delay of its own inherits the shared one."""
+    repo = _make_archive(tmp_path)
+    assert repo.crawl_delay is None
+    RepoRegistry([repo], default_crawl_delay=3.0)
+    assert repo.crawl_delay == 3.0
+
+
+def test_registry_leaves_an_explicit_repo_delay_alone(tmp_path):
+    """A repo that set its own delay keeps it — that is the point of the knob.
+
+    A CDN-backed repo asks to be read briskly; the shared default must not
+    quietly overwrite that back to the polite gap an origin server needs.
+    """
+    repo = ArchiveRepo(
+        cache_dir=tmp_path, crawl_delay=0.5,
+        url_pattern=r"archive\.org/details/(.+?)(?:/|$|\?|#)",
+        base_url="https://archive.org",
+    )
+    RepoRegistry([repo], default_crawl_delay=3.0)
+    assert repo.crawl_delay == 0.5
+
+
 # ── ArchiveRepo ──────────────────────────────────────────────────────────
 
 def _make_archive(tmp_path):

@@ -48,6 +48,40 @@ class FetcherResult(ResolveResult):
     locator: str | None = None
 
 
+# ── Repo outcomes ───────────────────────────────────────────────────────
+
+@dataclass
+class CrawlOutcome:
+    """What happened when a repo was asked for a document.
+
+    The *absence* of one (``crawl_outcome`` returning ``None``) means the
+    document was never asked for, because it was already cached. That is
+    neither a success nor a failure and must not be reported as either —
+    counting a warm cache as ``ok`` is how a check ends up confirming
+    something it never looked at.
+    """
+
+    repo: str
+    key: str
+    status: str  # "ok" | "not_found" | "unavailable"
+    reason: str = ""
+
+
+@dataclass
+class TextOutcome:
+    """Extracted source text, and why there is none when there is none.
+
+    ``status`` is what the report needs in order to blame the right thing:
+    a page that does not exist, a fetch that failed, and a document that
+    really is empty are three different findings, and they used to arrive
+    as one indistinguishable "empty extraction (0 chars)".
+    """
+
+    text: str
+    status: str = "ok"  # ok | not_found | unavailable | no_file | empty
+    reason: str = ""
+
+
 # ── Fetch metadata ──────────────────────────────────────────────────────
 
 @dataclass

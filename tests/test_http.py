@@ -23,9 +23,14 @@ class _FakeRedirect:
 
 class _FakeResponse:
     def __init__(self, content=b"network body", status_ok=True,
-                 url="https://example.com/page", history=None):
+                 url="https://example.com/page", history=None, status_code=None):
         self.content = content
         self._status_ok = status_ok
+        # A real response always carries a status, and the fetcher now reads it
+        # so that a repo can tell "the server said no such page" from "there was
+        # no server". A double that omitted it let that distinction go untested.
+        self.status_code = status_code if status_code is not None else (
+            200 if status_ok else 404)
         self.url = url
         self.history = history or []
 
@@ -300,3 +305,59 @@ class TestRedirects:
             f.get("https://old.example.com/page")
 
         assert f.redirect_for("https://old.example.com/page") is None
+
+
+class TestStatus:
+    """A repo must be able to tell "the server said no" from "there was no server".
+
+    ``get`` returns None for a 404, a 500, a timeout and a DNS failure alike.
+    A repo that read all of those as "this document does not exist" would
+    report a citation as rotten because a cable was unplugged.
+    """
+
+    def test_a_404_is_remembered_as_a_404(self, tmp_path):
+        f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+        resp = _FakeResponse(status_ok=False, status_code=404)
+        with patch("apysource.http.requests.get", return_value=resp):
+            assert f.get("https://example.com/gone") is None
+        assert f.status_for("https://example.com/gone") == 404
+
+    def test_a_server_error_is_not_a_404(self, tmp_path):
+        f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+        resp = _FakeResponse(status_ok=False, status_code=503)
+        with patch("apysource.http.requests.get", return_value=resp):
+            assert f.get("https://example.com/flaky") is None
+        assert f.status_for("https://example.com/flaky") == 503
+
+    def test_a_request_that_never_reached_a_server_has_no_status(self, tmp_path):
+        """The case that matters: no response at all means no claim at all."""
+        f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+        with patch("apysource.http.requests.get",
+                   side_effect=requests.ConnectionError("no route to host")):
+            assert f.get("https://example.com/page") is None
+        assert f.status_for("https://example.com/page") is None
+
+    def test_an_untried_url_has_no_status(self, tmp_path):
+        f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+        assert f.status_for("https://example.com/never-asked") is None
+
+    def test_a_success_records_its_status(self, tmp_path):
+        f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+        with patch("apysource.http.requests.get",
+                   return_value=_FakeResponse(b"body")):
+            f.get("https://example.com/ok")
+        assert f.status_for("https://example.com/ok") == 200
+
+    def test_refresh_clears_a_stale_status(self, tmp_path):
+        """A page that 404'd and then came back must not stay a 404."""
+        f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+        url = "https://example.com/back-again"
+        with patch("apysource.http.requests.get",
+                   return_value=_FakeResponse(status_ok=False, status_code=404)):
+            f.get(url)
+        assert f.status_for(url) == 404
+
+        with patch("apysource.http.requests.get",
+                   return_value=_FakeResponse(b"it returned")):
+            assert f.get(url, force=True) == "it returned"
+        assert f.status_for(url) == 200

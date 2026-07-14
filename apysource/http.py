@@ -44,6 +44,7 @@ class CachedFetcher:
         self.default_delay = default_delay
         self.default_timeout = default_timeout
         self._redirects: dict[str, Redirect] = {}
+        self._statuses: dict[str, int | None] = {}
 
     @staticmethod
     def _cache_key(url: str) -> str:
@@ -89,6 +90,18 @@ class CachedFetcher:
 
         self._redirects[url] = info
         return info
+
+    def status_for(self, url: str) -> int | None:
+        """The HTTP status the last fetch of this URL got, if it got one.
+
+        ``None`` means no status was seen — the URL was never fetched in this
+        process, or the request never reached a server at all (DNS failure,
+        timeout, connection reset). That distinction is the whole reason this
+        exists: ``get`` returns ``None`` for a 404 and for a network outage
+        alike, and a repo that reads both as "this document does not exist"
+        would blame a citation for an unplugged cable.
+        """
+        return self._statuses.get(url)
 
     def _record_redirect(self, url: str, resp: requests.Response) -> None:
         """Persist where a fetch landed, alongside its cached body.
@@ -151,6 +164,7 @@ class CachedFetcher:
             path.unlink(missing_ok=True)
             self._meta_path(url).unlink(missing_ok=True)
             self._redirects.pop(url, None)
+            self._statuses.pop(url, None)
 
         if path.exists():
             return path.read_bytes()
@@ -175,11 +189,19 @@ class CachedFetcher:
             # the destination even though there is no body to cache, so the
             # report can say "moved, and the move led nowhere" instead of a
             # bare "could not fetch".
+            #
+            # The status is kept for the same reason, and it is left unset
+            # when the request never reached a server: a caller asking "was
+            # this a 404?" must be able to hear "I don't know".
             if e.response is not None:
+                self._statuses[url] = e.response.status_code
                 self._record_redirect(url, e.response)
+            else:
+                self._statuses[url] = None
             logger.error("fetching %s: %s", url, e)
             return None
 
+        self._statuses[url] = resp.status_code
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(resp.content)
