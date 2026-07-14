@@ -39,6 +39,24 @@ def _extract_title(body: str, fmt: ContentFormat) -> str:
     return ""
 
 
+def _warn_if_redirected(http_client, url: str) -> None:
+    """Say so when the URL being cited is not the one that answered.
+
+    Cheapest possible moment to fix a stale citation: before it is written
+    down. The fetcher is duck-typed, so a custom one need not record this.
+    """
+    redirect_for = getattr(http_client, "redirect_for", None)
+    if redirect_for is None:
+        return
+
+    info = redirect_for(url)
+    if info is None or not info.redirected:
+        return
+
+    print(f"  Note: {url} redirects to {info.final_url}", file=sys.stderr)
+    print("        consider citing the final URL instead", file=sys.stderr)
+
+
 def find_snippet(http_client, url: str, snippet: str,
                  *, force: bool = False) -> tuple[str, str, LocateResult]:
     """Fetch URL, locate snippet, return (content_type, title, result).
@@ -50,6 +68,8 @@ def find_snippet(http_client, url: str, snippet: str,
     if not body:
         print(f"Error: could not fetch {url}", file=sys.stderr)
         sys.exit(1)
+
+    _warn_if_redirected(http_client, url)
 
     fmt = detect_format(body)
     content_type = fmt.name

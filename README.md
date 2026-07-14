@@ -58,13 +58,20 @@ apysource fetches the page (caching it on disk), finds the section by name, and 
 
   [PASS] Fragments: cache resolution.................. 2/2
   [PASS] Fragments: content extraction................ 2/2
+  [PASS] Fragments: source urls....................... 2/2
   [PASS] Fragments: snippet verified.................. 2/2
 
   ======================================================================
-  Summary: 3 PASS, 0 FAIL, 0 WARN
+  Summary: 4 PASS, 0 FAIL, 0 WARN
   EXIT CODE: 0 (all checks passed)
   ======================================================================
 ```
+
+`source urls` reports citations whose URL has **moved**. Redirects are
+followed, so such a source still verifies — against whatever it was
+forwarded to, which quietly turns "this URL says X" into "wherever this URL
+leads says X". A moved source warns (exit 0) and names its new home; pass
+`--strict-redirects` to fail on it instead.
 
 ### 3. Discover
 
@@ -154,6 +161,8 @@ Without `-c`, apysource uses built-in defaults (all built-in repos enabled). Pas
 Pass `--provenance file.ttl` to `check` to write a PROV-O graph recording which fragments were verified, when, and by which activity.
 
 Fetched pages are cached on disk and reused indefinitely (no time-based expiry). Pass `--refresh` to `check`, `locate`, or `add` to bypass the cache and re-fetch. See [docs/advanced.md](docs/advanced.md#caching-and-freshness).
+
+Pass `--strict-redirects` to `check` to fail, rather than warn, when a source URL has moved. Note that a page cached before apysource recorded redirect destinations reports its destination as *unknown*, not as clean — `--refresh` resolves that.
 
 ## Advanced Features
 

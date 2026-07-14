@@ -83,9 +83,15 @@ class Failure:
 
 @dataclass
 class CheckResult:
-    """Result of a verification check."""
+    """Result of a verification check.
+
+    Warnings report something worth knowing that is not, on its own, a
+    reason to fail the run — a source that still verifies, but only
+    because a redirect carried it somewhere else.
+    """
 
     name: str
     ok: int
     total: int
     failures: list[Failure] = field(default_factory=list)
+    warnings: list[Failure] = field(default_factory=list)
