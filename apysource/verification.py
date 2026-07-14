@@ -15,6 +15,7 @@ from typing import Any, cast
 from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import RDF, XSD
 
+from apysource.diagnostics import explain_snippet_failure
 from apysource.graph import local_name
 from apysource.namespaces import PROV, SV
 from apysource.repos import RepoRegistry
@@ -268,8 +269,15 @@ def _run_chain_checks(
                 prov_graph.add((frag, SV.verificationStatus, Literal("verified")))
                 prov_graph.add((frag, PROV.wasGeneratedBy, activity))
         else:
-            snippet_fail.append(Failure(local_name(frag), local_name(frag),
-                                        "snippet not found in extracted content"))
+            # Diagnose from the text already in hand — the extraction is
+            # right here, and re-fetching to diff it would be absurd.
+            where = result.locator if isinstance(result, FetcherResult) else ""
+            snippet_fail.append(Failure(
+                local_name(frag), local_name(frag),
+                "snippet not found in extracted content",
+                explain_snippet_failure(norm_snippet, norm_source,
+                                        where=where or ""),
+            ))
             if prov_graph is not None:
                 prov_graph.add((frag, SV.verificationStatus, Literal("failed")))
 
@@ -286,13 +294,15 @@ def _print_records(records: list[Failure]) -> None:
 
     by_group = defaultdict(list)
     for f in records:
-        by_group[f.group].append(f"{f.item}: {f.reason}")
+        by_group[f.group].append(f)
 
     for group in sorted(by_group, key=lambda t: -len(by_group[t])):
         items = by_group[group]
         print(f"         {group}/ ({len(items)})")
-        for item in items:
-            print(f"           {item}")
+        for f in items:
+            print(f"           {f.item}: {f.reason}")
+            for line in f.hint:
+                print(f"             {line}")
 
 
 def print_report(checks: list[CheckResult], summary: bool = False,

@@ -74,11 +74,16 @@ class Redirect:
 
 @dataclass
 class Failure:
-    """A single verification failure."""
+    """A single verification failure.
+
+    ``hint`` carries the diagnosis when there is one — the passage the
+    source actually contains, and how it differs from what was cited.
+    """
 
     group: str
     item: str
     reason: str
+    hint: list[str] = field(default_factory=list)
 
 
 @dataclass

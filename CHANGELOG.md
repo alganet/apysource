@@ -24,6 +24,12 @@ All notable changes to this project are documented here. The format is based on
   path, so a project directory containing those words no longer hides every `.ttl` file.
 
 ### Added
+- A failed snippet now explains itself. `check` and `locate` find the passage the source
+  actually contains and show what differs — a word-level diff naming the words the citation
+  lacks, or, when the words are right and only the typography is wrong, a plain
+  "differs only in case" (or whitespace, or inline markup) plus the source's exact wording.
+  Previously "snippet not found" was the entire diagnosis, and finding out why meant fetching
+  the document and diffing it by hand.
 - Redirects are now surfaced instead of being followed silently. A source whose URL has moved
   still verifies — against the document it was forwarded to — so `check` reports a new
   `source urls` check that names the new destination, `locate`/`add` note it on stderr, and

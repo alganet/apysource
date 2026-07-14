@@ -14,6 +14,7 @@ from rdflib.namespace import RDF
 from rdflib.namespace import DCTERMS
 
 from apysource.cli._base import pop_flag
+from apysource.diagnostics import explain_snippet_failure
 from apysource.formats import (
     ContentFormat,
     LocateResult,
@@ -82,9 +83,23 @@ def find_snippet(http_client, url: str, snippet: str,
 
     if result is None:
         print(f"Error: snippet not found in {url}", file=sys.stderr)
+        for line in explain_snippet_failure(snippet, _searchable_text(body, fmt)):
+            print(f"  {line}", file=sys.stderr)
         sys.exit(1)
 
     return content_type, title, result
+
+
+def _searchable_text(body: str, fmt) -> str:
+    """The document as the snippet would have to match it.
+
+    Markup is stripped where the format knows how, so a hint diffs against
+    prose rather than against tags.
+    """
+    strip_tags = getattr(fmt, "strip_tags", None)
+    if strip_tags is not None:
+        return str(strip_tags(body))
+    return body
 
 
 def _targetter_key(result: LocateResult) -> str:

@@ -387,3 +387,56 @@ def test_report_tags_a_warned_check_and_counts_it(capsys):
     assert "1 PASS, 0 FAIL, 1 WARN" in out
     assert "http://new/" in out
     assert "EXIT CODE: 0" in out
+
+
+# ── Snippet failure hints (A1) ───────────────────────────────────────────
+
+RFC_9112 = (
+    "A client MUST send a Host header field (Section 7.2 of [HTTP]) in all "
+    "HTTP/1.1 request messages. If the target URI includes an authority "
+    "component, then a client MUST send a field value for Host."
+)
+
+
+def test_snippet_failure_names_what_the_citation_dropped():
+    """The spike's own mistake: the parenthetical went missing."""
+    misquote = ("A client MUST send a Host header field in all HTTP/1.1 "
+                "request messages.")
+    check = _run_snippet_check(misquote, RFC_9112)
+
+    assert len(check.failures) == 1
+    hint = "\n".join(check.failures[0].hint)
+    assert "closest match" in hint
+    assert "(Section 7.2 of [HTTP])" in hint
+
+
+def test_snippet_failure_calls_out_a_case_difference():
+    check = _run_snippet_check(RFC_9112.lower(), RFC_9112)
+
+    hint = "\n".join(check.failures[0].hint)
+    assert "differs only in case" in hint
+    assert "source says:" in hint
+
+
+def test_snippet_failure_with_nothing_close_carries_no_hint():
+    """Don't invent a diagnosis when the quote is simply not there."""
+    check = _run_snippet_check(
+        "Entirely unrelated wording about marmalade and bicycles",
+        RFC_9112,
+    )
+    assert check.failures[0].hint == []
+
+
+def test_report_prints_the_hint_under_its_failure(capsys):
+    checks = [
+        CheckResult("snippet", 0, 1, [
+            Failure("src", "frag", "snippet not found in extracted content",
+                    ["closest match (81% similar)", "  - cited", "  + actual"]),
+        ]),
+    ]
+    print_report(checks)
+    out = capsys.readouterr().out
+
+    assert "snippet not found in extracted content" in out
+    assert "closest match (81% similar)" in out
+    assert "+ actual" in out

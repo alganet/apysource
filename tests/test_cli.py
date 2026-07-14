@@ -201,3 +201,40 @@ def test_check_sources_provenance_output(tmp_path, capsys):
     pg.parse(str(prov_file), format="turtle")
     activities = list(pg.subjects(RDF.type, SV.VerificationActivity))
     assert len(activities) >= 1
+
+
+def test_locate_not_found_explains_the_near_miss(capsys):
+    """A blind 'not found' is the thing that made authoring guesswork."""
+    from apysource.cli.locate import LocateCommand
+
+    page = ("<html><body><p>A client MUST send a Host header field "
+            "(Section 7.2 of [HTTP]) in all HTTP/1.1 request messages."
+            "</p></body></html>")
+    fetcher = MockFetcher(content=page)
+    cmd = LocateCommand(http_client=fetcher)
+
+    with pytest.raises(SystemExit, match="1"):
+        cmd.run(args=[
+            "http://example.com/page",
+            "A client MUST send a Host header field in all HTTP/1.1 "
+            "request messages.",
+        ])
+
+    err = capsys.readouterr().err
+    assert "snippet not found" in err
+    assert "closest match" in err
+    assert "(Section 7.2 of [HTTP])" in err
+
+
+def test_locate_notes_a_redirected_url(capsys):
+    """The cheapest moment to fix a stale citation: before writing it down."""
+    from apysource.cli.locate import LocateCommand
+
+    fetcher = MockFetcher(
+        redirects={"http://old.example.com/page": "http://new.example.com/page"},
+    )
+    cmd = LocateCommand(http_client=fetcher)
+    cmd.run(args=["http://old.example.com/page", "Hello world"])
+
+    err = capsys.readouterr().err
+    assert "redirects to http://new.example.com/page" in err
