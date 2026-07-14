@@ -20,6 +20,8 @@ from urllib.parse import unquote
 
 from apysource.repos._base import (
     BaseRepo,
+    RepoNotFound,
+    RepoUnavailable,
     SMALL_FILE_THRESHOLD,
     extract_line_range,
     slugify,
@@ -32,6 +34,7 @@ class WiktionaryRepo(BaseRepo):
     """Unified source + crawler for Wiktionary etymology data."""
 
     NAME = "wiktionary"
+    supports_crawl = True
 
     # ── Source interface ──────────────────────────────────────────────
 
@@ -110,9 +113,12 @@ class WiktionaryRepo(BaseRepo):
 
     # ── Crawler interface ─────────────────────────────────────────────
 
-    def crawl(self, key: str, *, delay: float = 3.0,
+    def crawl(self, key: str, *, delay: float | None = None,
               force: bool = False, from_cache: bool = False) -> dict | None:
-        """Fetch a term's etymology from Wiktionary API."""
+        """Fetch a term's etymology from Wiktionary API.
+
+        Raises RepoNotFound when Wiktionary has no such term.
+        """
         return self._fetch_term(key, force=force, from_cache=from_cache)
 
     def _fetch_term(self, term: str,
@@ -128,21 +134,21 @@ class WiktionaryRepo(BaseRepo):
 
         url = (f"{self.base_url}/w/api.php?action=parse"
                f"&page={api_term}&prop=wikitext&format=json")
-        raw = self.http_client.get(url, force=force, from_cache=from_cache,
-                                   timeout=15)
-        if not raw:
-            logger.warning("[%s] fetch failed", term)
-            return None
+        raw = self.fetch(url, term, force=force, from_cache=from_cache,
+                         timeout=15)
 
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError:
-            logger.warning("[%s] invalid JSON response", term)
-            return None
+        except json.JSONDecodeError as e:
+            raise RepoUnavailable(self.NAME, term,
+                                  "the API returned invalid JSON") from e
 
+        # MediaWiki answers a missing page with HTTP 200 and an error payload,
+        # so the status code cannot see this one — only the body can. It is
+        # nonetheless an authoritative "no such term".
         if "error" in data:
-            logger.warning("[%s] NOT FOUND: %s", term, data['error'].get('info', '?'))
-            return None
+            raise RepoNotFound(self.NAME, term,
+                               data["error"].get("info", "no such page"))
 
         wikitext = data.get("parse", {}).get("wikitext", {}).get("*", "")
         language_etymologies = self._parse_language_sections(wikitext)

@@ -8,7 +8,10 @@ wiktionary) and the Gutenberg matchers. Network access is mocked via
 
 import json
 
+import pytest
+
 from apysource.repos import gutenberg_bible, gutenberg_classical
+from apysource.repos._base import RepoNotFound, RepoUnavailable
 from apysource.repos.archive import ArchiveRepo
 from apysource.repos.gutenberg import GutenbergRepo
 from apysource.repos.wikisource import WikisourceRepo
@@ -69,20 +72,73 @@ def test_archive_process_item_success(tmp_path):
     assert (tmp_path / "item1" / "fulltext.txt").read_text() == "the full text"
 
 
-def test_archive_process_item_metadata_fetch_failed(tmp_path):
+def test_archive_crawl_raises_not_found_for_an_item_that_is_not_there(tmp_path):
+    """A 404 from archive.org means archive.org has no such item. Say that."""
     fetcher = MockFetcher(routes={"/metadata/": None})
     repo = _archive(tmp_path, fetcher)
-    result = repo.crawl("item1")
-    assert result["status"] == "error"
-    assert "metadata fetch failed" in result["error"]
+    with pytest.raises(RepoNotFound):
+        repo.crawl("item1")
+
+
+def test_archive_crawl_raises_unavailable_when_the_server_is_down(tmp_path):
+    """A 503 is not an absence, and must not be reported as one."""
+    fetcher = MockFetcher(routes={"/metadata/": None},
+                          statuses={"/metadata/": 503})
+    repo = _archive(tmp_path, fetcher)
+    with pytest.raises(RepoUnavailable):
+        repo.crawl("item1")
+
+
+def test_archive_crawl_raises_unavailable_when_unreachable(tmp_path):
+    """No response at all means no claim at all about whether the item exists."""
+    fetcher = MockFetcher(routes={"/metadata/": None},
+                          statuses={"/metadata/": None})
+    repo = _archive(tmp_path, fetcher)
+    with pytest.raises(RepoUnavailable):
+        repo.crawl("item1")
 
 
 def test_archive_process_item_invalid_json(tmp_path):
+    """Garbage back from the API says nothing about whether the item exists."""
     fetcher = MockFetcher(routes={"/metadata/": "{bad json"})
     repo = _archive(tmp_path, fetcher)
-    result = repo.crawl("item1")
-    assert result["status"] == "error"
-    assert "invalid metadata JSON" in result["error"]
+    with pytest.raises(RepoUnavailable):
+        repo.crawl("item1")
+
+
+def test_archive_crawl_raises_not_found_when_the_item_holds_no_text(tmp_path):
+    """A real item with nothing citable in it is still nothing to cite."""
+    meta = json.dumps({
+        "metadata": {"identifier": "item1", "title": "A Painting"},
+        "files": [{"name": "scan.jpg", "format": "JPEG"}],
+    })
+    repo = _archive(tmp_path, MockFetcher(routes={"/metadata/": meta}))
+    with pytest.raises(RepoNotFound):
+        repo.crawl("item1")
+
+
+def test_archive_crawl_leaves_nothing_behind_when_the_item_is_missing(tmp_path):
+    """No 0-byte sentinel. A page that returns later must need no --refresh."""
+    repo = _archive(tmp_path, MockFetcher(routes={"/metadata/": None}))
+    with pytest.raises(RepoNotFound):
+        repo.crawl("item1")
+    assert list(tmp_path.rglob("*.txt")) == []
+
+
+def test_archive_crawl_passes_the_repo_delay_to_the_fetcher(tmp_path):
+    """A per-repo delay that never reaches the fetch is decoration."""
+    meta = json.dumps({
+        "metadata": {"identifier": "item1", "title": "A Book"},
+        "files": [{"name": "b_djvu.txt", "format": "DjVuTXT"}],
+    })
+    fetcher = MockFetcher(routes={"/metadata/": meta, "/download/": "text"})
+    repo = ArchiveRepo(
+        cache_dir=tmp_path, http_client=fetcher, crawl_delay=0.5,
+        url_pattern=r"archive\.org/details/(.+?)(?:/|$|\?|#)",
+        base_url="https://archive.org",
+    )
+    repo.crawl("item1")
+    assert all(kw.get("delay") == 0.5 for _url, kw in fetcher.requests)
 
 
 def test_archive_crawl_uses_cache(tmp_path):
@@ -272,8 +328,19 @@ def test_wikisource_get_page_text_parses_api_json(tmp_path):
 
 
 def test_wikisource_get_page_text_invalid_json(tmp_path):
+    """Unparseable API output is an unknown, not a missing page."""
     repo = _wikisource(tmp_path, MockFetcher("nope"))
-    assert repo._get_page_text("X") == ""
+    with pytest.raises(RepoUnavailable):
+        repo._get_page_text("X")
+
+
+def test_wikisource_crawl_raises_not_found_for_a_missing_page(tmp_path):
+    payload = json.dumps({"error": {"info": "missing title"}})
+    repo = _wikisource(tmp_path, MockFetcher(payload))
+    with pytest.raises(RepoNotFound):
+        repo.crawl("No Such Work")
+    # And it leaves no directory behind to be mistaken for a crawl that worked.
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_wikisource_get_subpages(tmp_path):
@@ -395,6 +462,20 @@ def test_wiktionary_fetch_term_success(tmp_path):
 
 
 def test_wiktionary_fetch_term_not_found(tmp_path):
+    """It used to return None — the same answer it gave for "already cached".
+
+    Two opposite outcomes, one indistinguishable value. Now it says which.
+    """
     payload = json.dumps({"error": {"info": "missing title"}})
     repo = _wiktionary(tmp_path, MockFetcher(payload))
-    assert repo.crawl("nonexistentword") is None
+    with pytest.raises(RepoNotFound) as caught:
+        repo.crawl("nonexistentword")
+    assert caught.value.reason == "missing title"
+
+
+def test_wiktionary_crawl_writes_nothing_when_the_word_is_absent(tmp_path):
+    payload = json.dumps({"error": {"info": "missing title"}})
+    repo = _wiktionary(tmp_path, MockFetcher(payload))
+    with pytest.raises(RepoNotFound):
+        repo.crawl("nonexistentword")
+    assert list(tmp_path.rglob("*.txt")) == []
