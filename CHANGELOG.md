@@ -24,6 +24,39 @@ All notable changes to this project are documented here. The format is based on
   path, so a project directory containing those words no longer hides every `.ttl` file.
 
 ### Added
+- **MDN pages now verify against the Markdown MDN is *written in*, not the page it renders.**
+  MDN reorganizes constantly, and a moved page keeps answering its old URL with a 301 — so a
+  citation that had gone stale still passed, against whatever the redirect led to. The new
+  `MdnRepo` resolves an MDN URL to its authored file in `mdn/content`, where a moved page's slug
+  is simply gone: the citation fails, and says which slug it could not find. Because authored
+  Markdown is not what a reader sees, quotes are matched against a rendering of it — KumaScript
+  macros expand the way the site expands them, so `{{HTTPHeader("Origin")}}` is the word `Origin`
+  and you can still quote what the browser showed you. Text a macro *generates* — the
+  browser-compatibility and specifications tables, live samples — is not in the source file,
+  cannot be reconstructed from it, and is **marked rather than quietly deleted**: deleting it
+  would sew the surrounding words into a sentence the page never showed, and a citation that
+  invented that sentence would have passed. Only `en-US` is handled; translations live in a
+  different repository, and mapping them here would report every live, correctly-cited page in a
+  locale as missing.
+- **A repo now fetches a document it does not have.** Previously a cold cache made `check` fall
+  back to the generic fetcher without a word, so the snippet was verified against the rendered web
+  page instead of the repository the citation names — a different document, checked with no signal
+  that anything had changed, and the answer flipped depending on what happened to be in the cache.
+  A repo that matches a URL now owns it: `check` crawls the document on a miss, `--refresh`
+  re-crawls it (it previously had *no effect* on a repo, so a repo could not be refreshed at all),
+  and the new `--no-crawl` reports the miss honestly rather than fetching something else. A repo
+  that matches a URL but has no crawler still falls back — but the new `Repo documents` check
+  names it out loud, and `--strict-repos` turns that warning into a failure.
+- **A repo can now say that a document does not exist.** `RepoNotFound` reports it as its own
+  failure — `mdn: no such document: en-us/web/http/headers/origin` — where a missing page used to
+  arrive as `empty extraction (0 chars)`, indistinguishable from a document that was merely empty,
+  blamed on the citation rather than on the page, and stuck that way until the next `--refresh`.
+  Nothing is written to the cache, so a page that returns upstream verifies on the next run with
+  no flag at all. A fetch that merely *failed* raises `RepoUnavailable` and is reported as an
+  unknown: a timeout is not an absence, and saying so would be a confident wrong answer.
+- **Repos can set their own crawl delay.** `crawl_delay` (defaulting from the registry's
+  `default_crawl_delay`) is passed per request, so a CDN-backed repo can be read briskly without
+  making every other source a rude crawler as a side effect.
 - A failed snippet now explains itself. `check` and `locate` find the passage the source
   actually contains and show what differs — a word-level diff naming the words the citation
   lacks, or, when the words are right and only the typography is wrong, a plain
@@ -43,6 +76,18 @@ All notable changes to this project are documented here. The format is based on
 - `ruff` linting/formatting, wired into `make lint`/`make format` and the `make check` gate.
 
 ### Changed
+- **`crawl()` is now part of the `BaseRepo` contract** rather than a convention nothing called.
+  Repos that implement it set `supports_crawl = True`, and its `delay` argument — which every
+  built-in repo accepted and then ignored — is now honored. A custom repo written before this
+  keeps working unchanged; it simply has no crawler, and says so when it falls back.
+- **Breaking, for anyone calling a built-in `crawl()` directly.** `WiktionaryRepo.crawl()` returned
+  `None` for a word Wiktionary does not have — the same answer it gave for "already cached", two
+  opposite outcomes sharing one indistinguishable value. It now raises `RepoNotFound`.
+  `ArchiveRepo`, `GutenbergRepo` and `WikisourceRepo` likewise raise `RepoNotFound` /
+  `RepoUnavailable` where they returned error dicts or `None`. They also no longer leave anything
+  behind on failure: Wikisource created the page directory before knowing the page existed, and
+  Gutenberg wrote an empty chapter index for a book it could not parse — caching the failure as a
+  success, and leaving every citation into it failing forever as an "empty extraction".
 - The crawler `User-Agent` is now derived from the package version (`apysource/<version>`) so it
   tracks releases automatically, instead of the stale hard-coded `apysource/1.0`.
 - The package version now lives in `apysource.__version__` and is read dynamically by the build,

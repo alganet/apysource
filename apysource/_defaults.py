@@ -7,6 +7,7 @@ import apysource.http
 import apysource.repos
 import apysource.repos.archive
 import apysource.repos.gutenberg
+import apysource.repos.mdn
 import apysource.repos.wikisource
 import apysource.repos.wiktionary
 
@@ -42,6 +43,11 @@ class Compiled:
             self._repo_wiktionary = apysource.repos.wiktionary.WiktionaryRepo(url_pattern=self.wiktionary_url_pattern(), base_url=self.wiktionary_base_url())
         return self._repo_wiktionary
 
+    def repo_mdn(self):
+        if not hasattr(self, '_repo_mdn'):
+            self._repo_mdn = apysource.repos.mdn.MdnRepo(url_pattern=self.mdn_url_pattern(), base_url=self.mdn_base_url(), crawl_delay=self.mdn_crawl_delay())
+        return self._repo_mdn
+
     def validate_cmd(self):
         if not hasattr(self, '_validate_cmd'):
             self._validate_cmd = apysource.cli.validate.ValidateCommand(ctx=self.ctx())
@@ -59,7 +65,7 @@ class Compiled:
 
     def registry(self):
         if not hasattr(self, '_registry'):
-            self._registry = apysource.repos.RepoRegistry(repos=[self.repo_archive(), self.repo_gutenberg(), self.repo_wikisource(), self.repo_wiktionary()], sources_cache_dir=self.sources_cache_subdir(), http_client=self.http_client())
+            self._registry = apysource.repos.RepoRegistry(repos=[self.repo_archive(), self.repo_gutenberg(), self.repo_mdn(), self.repo_wikisource(), self.repo_wiktionary()], sources_cache_dir=self.sources_cache_subdir(), http_client=self.http_client(), default_crawl_delay=self.default_crawl_delay())
         return self._registry
 
     def check_sources_cmd(self):
@@ -108,4 +114,13 @@ class Compiled:
 
     def wiktionary_base_url(self):
         return 'https://en.wiktionary.org'
+
+    def mdn_url_pattern(self):
+        return 'developer\\.mozilla\\.org/(?i:en-US)/docs/([^#?\\s]+)'
+
+    def mdn_base_url(self):
+        return 'https://raw.githubusercontent.com/mdn/content/main/files'
+
+    def mdn_crawl_delay(self):
+        return 0.5
 compiled = Compiled()

@@ -125,29 +125,98 @@ The generic path (CSS selectors, line ranges, section selectors) works for most 
 |------------------|-------------------|-------------------------------|
 | `ArchiveRepo`    | archive.org       | `lines:N-M`                   |
 | `GutenbergRepo`  | Project Gutenberg | `chapter:N`, title match      |
+| `MdnRepo`        | MDN (`en-US`)     | section path, e.g. `Syntax`   |
 | `WikisourceRepo` | Wikisource        | `section:Name`, subpage match |
 | `WiktionaryRepo` | Wiktionary        | term name, `language/section` |
 
 All built-in repos are enabled by default. Most URLs work without a specialized repo — the generic fetcher + targetters (section selectors, CSS, line ranges) handle any web page. Repos are for sources that need multi-page crawling or domain-specific extraction. To customize URL patterns or add your own repos, use a TOML config file. See `defaults.toml`.
 
+### MDN
+
+`MdnRepo` checks an MDN citation against the Markdown MDN is *written in*, in the
+`mdn/content` repository — not against the page it renders. MDN reorganizes
+constantly and a moved page keeps answering its old URL with a 301, so a stale
+citation otherwise passes against whatever the redirect leads to. The authored
+file does not play along: a moved page's slug is gone, and the citation fails.
+
+Three things follow from checking the source rather than the page:
+
+- **Quotes are matched against a rendering of the Markdown**, so you can still
+  paste what the browser showed you. KumaScript macros expand the way the site
+  expands them: `{{HTTPHeader("Origin")}}` is the word `Origin`.
+- **Text a macro *generates* cannot be quoted.** The browser-compatibility and
+  specifications tables, live samples and sidebars are not in the source file
+  and cannot be reconstructed from it. A quote of one fails, and the failure
+  shows a `⟨macro⟩` mark where the generated text would have been.
+- **MDN fragments target with `location:`, not `section:`.** A repo is handed
+  only the location hint, so a `section:` on an MDN fragment is ignored.
+
+Only `en-US` URLs are handled. Translations live in a different repository
+(`mdn/translated-content`), so other locales fall through to the generic
+fetcher — weaker (they are redirect-warned, not canonical-enforced), but honest.
+
+Known limitation: `mdn_base_url` ends in `main`, a moving ref, so the text a
+citation is checked against can change between runs with no signal. Put a commit
+SHA where `main` is to pin it.
+
+### Fetching on demand
+
+A repo that matches a URL *owns* that URL. Routing does not depend on what
+happens to be in the cache: `check` crawls a document the repo does not have
+yet, `--refresh` re-crawls it, and `--no-crawl` reports the miss instead of
+fetching. (Previously a cold cache fell back to the generic fetcher, so the
+snippet was quietly verified against the rendered web page rather than the
+repository the citation names — a different document, with no signal.)
+
+A repo that matches a URL but has *no* crawler still falls back to the fetcher.
+That is no longer silent: the `Repo documents` check names the repo it fell back
+from, and `--strict-repos` turns that warning into a failure.
+
+### When a repo has no such document
+
+`crawl()` raises `RepoNotFound` when the repository authoritatively has no such
+document, and `RepoUnavailable` when the fetch merely failed. The distinction is
+load-bearing: a 404 is knowledge, a timeout is the absence of it, and reporting
+"no such page" because the network was down would be a confident wrong answer
+about the source.
+
+Neither writes anything to the cache. A page that comes back upstream verifies
+on the next run, with no `--refresh` needed.
+
 ### Writing a custom repo
 
 ```python
-from apysource.repos import BaseRepo
+from apysource.repos import BaseRepo, RepoNotFound
 
 class MyRepo(BaseRepo):
     NAME = "myrepo"
+    supports_crawl = True          # opt in; without it, a cold cache falls back
 
     def url_to_key(self, url):
         m = self.url_pattern.search(url)
         return m.group(1) if m else None
 
     def resolve_location(self, location, key):
-        path = self.cache_dir / key / "content.txt"
+        # A cache lookup. It must not fetch — that is what crawl is for.
+        path = self.cache_root / key / "content.txt"
         return path if path.exists() else None
+
+    def crawl(self, key, *, delay=None, force=False, from_cache=False):
+        # self.fetch raises RepoNotFound on a 404 and RepoUnavailable otherwise.
+        body = self.fetch(f"{self.base_url}/{key}.txt", key, force=force)
+        if not body.strip():
+            raise RepoNotFound(self.NAME, key, "the document is empty")
+        path = self.cache_root / key / "content.txt"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
 ```
 
-`BaseRepo` requires `url_pattern` and `base_url` (from TOML config). `cache_dir` and `http_client` come from the registry. Override `extract_content` for custom extraction logic.
+`BaseRepo` requires `url_pattern` and `base_url` (from TOML config). `cache_dir`,
+`http_client` and `crawl_delay` come from the registry — `crawl_delay` defaults
+from the registry's `default_crawl_delay` unless the repo sets its own, and is
+passed per request, so a repo backed by a CDN can be read briskly without making
+every other source a rude crawl. Override `extract_content` for custom extraction
+logic.
 
 ## Caching and freshness
 
@@ -170,6 +239,9 @@ apysource check sources.yaml --refresh     # re-fetch every source, then verify
 apysource locate <url> <snippet> --refresh # re-fetch this URL while locating
 apysource add sources.yaml <url> <snippet> --refresh
 ```
+
+`--refresh` re-crawls repo-backed sources too. It previously had no effect on
+one at all, which meant a repo's cache could not be refreshed by any means.
 
 A body cached before apysource recorded destinations has no sidecar, so its URL's destination is
 simply **unknown**. `check` says so rather than passing it: an unchecked URL is not a clean one,
