@@ -4,11 +4,17 @@
 
 """HTTP client with transparent file-based caching.
 
-Stores raw response bodies in a flat directory keyed by URL hash.
-No sidecar files, no metadata — just the response body.
+Stores raw response bodies in a flat directory keyed by URL hash, next to
+a small JSON sidecar recording where the request actually landed.
+
+Redirects are followed, as they must be, but they are not forgotten: a
+source whose URL now 301s still verifies against the document it was
+forwarded to, which quietly turns "this URL says X" into "wherever this
+URL leads says X". The sidecar is what lets a check say so out loud.
 """
 
 import hashlib
+import json
 import logging
 import time
 from pathlib import Path
@@ -16,6 +22,7 @@ from pathlib import Path
 import requests
 
 from apysource import __version__
+from apysource.results import Redirect
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +43,7 @@ class CachedFetcher:
         self.user_agent = user_agent
         self.default_delay = default_delay
         self.default_timeout = default_timeout
+        self._redirects: dict[str, Redirect] = {}
 
     @staticmethod
     def _cache_key(url: str) -> str:
@@ -43,6 +51,53 @@ class CachedFetcher:
 
     def _cache_path(self, url: str) -> Path:
         return self.cache_dir / self._cache_key(url)
+
+    def _meta_path(self, url: str) -> Path:
+        return self.cache_dir / f"{self._cache_key(url)}.meta.json"
+
+    def redirect_for(self, url: str) -> Redirect | None:
+        """Where this URL actually led, or None if that is not known.
+
+        None means the body was cached before redirects were recorded, not
+        that the URL is clean — callers must not report it as such. A
+        ``--refresh`` re-fetch is what turns an unknown into a known.
+        """
+        if url in self._redirects:
+            return self._redirects[url]
+
+        meta = self._meta_path(url)
+        if not meta.exists():
+            return None
+
+        try:
+            data = json.loads(meta.read_text())
+            info = Redirect(
+                url=data["url"],
+                final_url=data["final_url"],
+                chain=[(int(s), u) for s, u in data.get("chain", [])],
+            )
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            logger.warning("unreadable redirect metadata for %s: %s", url, e)
+            return None
+
+        self._redirects[url] = info
+        return info
+
+    def _record_redirect(self, url: str, resp: requests.Response) -> None:
+        """Persist where a fetch landed, alongside its cached body."""
+        info = Redirect(
+            url=url,
+            final_url=resp.url,
+            chain=[(r.status_code, r.url) for r in resp.history],
+        )
+        self._redirects[url] = info
+
+        payload = {"url": info.url, "final_url": info.final_url,
+                   "chain": [list(hop) for hop in info.chain]}
+        meta = self._meta_path(url)
+        tmp = meta.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload))
+        tmp.rename(meta)
 
     def get(self, url: str, *, force: bool = False, from_cache: bool = False,
             delay: float | None = None, timeout: int | None = None,
@@ -74,8 +129,10 @@ class CachedFetcher:
         """
         path = self._cache_path(url)
 
-        if force and path.exists():
-            path.unlink()
+        if force:
+            path.unlink(missing_ok=True)
+            self._meta_path(url).unlink(missing_ok=True)
+            self._redirects.pop(url, None)
 
         if path.exists():
             return path.read_bytes()
@@ -102,6 +159,7 @@ class CachedFetcher:
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(resp.content)
         tmp.rename(path)
+        self._record_redirect(url, resp)
 
         if actual_delay > 0:
             time.sleep(actual_delay)

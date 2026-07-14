@@ -47,6 +47,29 @@ class FetcherResult(ResolveResult):
     locator: str | None = None
 
 
+# ── Fetch metadata ──────────────────────────────────────────────────────
+
+@dataclass
+class Redirect:
+    """Where a URL actually led.
+
+    An empty ``chain`` means the URL was fetched directly. The *absence*
+    of a Redirect (``None``) means something different and important: the
+    fetch predates redirect recording, so nothing is known. Reporting must
+    not read that as "no redirect" — a silently-followed 301 is the bug
+    this exists to surface.
+    """
+
+    url: str
+    final_url: str
+    chain: list[tuple[int, str]] = field(default_factory=list)
+
+    @property
+    def redirected(self) -> bool:
+        """Whether the request was answered by a different URL."""
+        return bool(self.chain)
+
+
 # ── Verification results ────────────────────────────────────────────────
 
 @dataclass
