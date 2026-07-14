@@ -122,6 +122,31 @@ class BaseRepo:
         """
         raise NotImplementedError
 
+    def fetch(self, url: str, key: str, *, force: bool = False,
+              from_cache: bool = False, timeout: int | None = None) -> str:
+        """Fetch a URL for this repo, or raise the failure that explains why not.
+
+        The one place the 404-versus-outage distinction is drawn, so that it
+        cannot rot differently in each repo. The fetcher answers ``None`` to a
+        missing page and to an unreachable server alike; only the status it saw
+        can tell them apart, and when it saw none, we say we do not know.
+        """
+        text = self.http_client.get(url, delay=self.crawl_delay, timeout=timeout,
+                                    force=force, from_cache=from_cache)
+        if text is not None:
+            return str(text)
+
+        status = None
+        status_for = getattr(self.http_client, "status_for", None)
+        if status_for is not None:
+            status = status_for(url)
+
+        if status in (404, 410):
+            raise RepoNotFound(self.NAME, key, f"{url} returned {status}")
+        if status is not None:
+            raise RepoUnavailable(self.NAME, key, f"{url} returned {status}")
+        raise RepoUnavailable(self.NAME, key, f"{url} could not be reached")
+
     def ensure(self, key: str, *, force: bool = False) -> None:
         """Crawl ``key`` at most once per run, replaying the same outcome.
 

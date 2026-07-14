@@ -22,6 +22,9 @@ from pathlib import Path
 
 from apysource.repos._base import (
     BaseRepo,
+    RepoError,
+    RepoNotFound,
+    RepoUnavailable,
     extract_content_with_fallback,
     slugify,
 )
@@ -33,6 +36,7 @@ class WikisourceRepo(BaseRepo):
     """Unified source + crawler for Wikisource works."""
 
     NAME = "wikisource"
+    supports_crawl = True
 
     # ── Source interface ──────────────────────────────────────────────
 
@@ -112,14 +116,23 @@ class WikisourceRepo(BaseRepo):
 
     # ── Crawler interface ─────────────────────────────────────────────
 
-    def crawl(self, key: str, *, delay: float = 3.0,
+    def crawl(self, key: str, *, delay: float | None = None,
               force: bool = False, from_cache: bool = False) -> dict:
-        """Download a Wikisource page and its subpages."""
+        """Download a Wikisource page and its subpages.
+
+        Raises RepoNotFound when Wikisource has no such page.
+        """
         return self._process_page(key, force=force, from_cache=from_cache)
 
     def _get_page_text(self, title: str, slug: str = "",
                        force: bool = False, from_cache: bool = False) -> str:
-        """Get full rendered text of a Wikisource page."""
+        """Get full rendered text of a Wikisource page.
+
+        Raises RepoNotFound if Wikisource has no such page, RepoUnavailable if
+        it could not be read. Callers that are merely hoovering up subpages
+        catch those and move on; the caller fetching the page a citation
+        actually names lets them through.
+        """
         params = {
             "action": "parse",
             "page": title,
@@ -130,18 +143,22 @@ class WikisourceRepo(BaseRepo):
         query = urllib.parse.urlencode(params)
         url = f"{f"{self.base_url}/w/api.php"}?{query}"
 
-        raw = self.http_client.get(url, force=force, from_cache=from_cache)
-        if not raw:
-            return ""
+        raw = self.fetch(url, title, force=force, from_cache=from_cache)
 
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError:
-            return ""
+        except json.JSONDecodeError as e:
+            raise RepoUnavailable(self.NAME, title,
+                                  "the API returned invalid JSON") from e
+
+        # MediaWiki reports a missing page in the body, with a 200 status.
+        if "error" in data:
+            raise RepoNotFound(self.NAME, title,
+                               data["error"].get("info", "no such page"))
 
         html = data.get("parse", {}).get("text", {}).get("*", "")
         if not html:
-            return ""
+            raise RepoNotFound(self.NAME, title, "the page has no text")
         from apysource.formats import HtmlFormat
         return HtmlFormat().strip_tags(html)
 
@@ -190,26 +207,33 @@ class WikisourceRepo(BaseRepo):
                 "crawled_at": datetime.now(timezone.utc).isoformat(),
             }
 
-        page_dir.mkdir(parents=True, exist_ok=True)
-
+        # Fetch before creating anything. A page Wikisource does not have
+        # should leave no directory behind to be mistaken for a crawl that
+        # worked — and _get_page_text raises rather than returning "".
         main_text = self._get_page_text(
             title, slug=slug, force=force, from_cache=from_cache)
-        if main_text:
-            main_txt.write_text(main_text, encoding="utf-8")
+
+        page_dir.mkdir(parents=True, exist_ok=True)
+        main_txt.write_text(main_text, encoding="utf-8")
 
         subpages = self._get_subpages(title)
         logger.info("Found %d subpages", len(subpages))
 
         total_chars = len(main_text)
         for i, sub in enumerate(subpages):
-            sub_text = self._get_page_text(
-                sub, slug=slug, force=force, from_cache=from_cache)
-            if sub_text:
-                sub_slug = sub.replace(
-                    title + "/", "").replace(" ", "_").replace("/", "_")
-                (page_dir / f"{sub_slug}.txt").write_text(
-                    sub_text, encoding="utf-8")
-                total_chars += len(sub_text)
+            # A subpage that has gone missing is not a reason to fail the page
+            # a citation actually names. Skip it, and say so.
+            try:
+                sub_text = self._get_page_text(
+                    sub, slug=slug, force=force, from_cache=from_cache)
+            except RepoError as e:
+                logger.warning("skipping subpage %s: %s", sub, e)
+                continue
+            sub_slug = sub.replace(
+                title + "/", "").replace(" ", "_").replace("/", "_")
+            (page_dir / f"{sub_slug}.txt").write_text(
+                sub_text, encoding="utf-8")
+            total_chars += len(sub_text)
             if (i + 1) % 10 == 0:
                 logger.info("... %d/%d subpages", i + 1, len(subpages))
 

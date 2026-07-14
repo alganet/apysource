@@ -18,6 +18,7 @@ from pathlib import Path
 
 from apysource.repos._base import (
     BaseRepo,
+    RepoNotFound,
     SMALL_FILE_THRESHOLD,
     extract_line_range,
 )
@@ -34,6 +35,7 @@ class GutenbergRepo(BaseRepo):
     """
 
     NAME = "gutenberg"
+    supports_crawl = True
 
     def __init__(self, cache_dir=None, http_client=None, matchers=None,
                  url_pattern=None, base_url=None):
@@ -121,9 +123,12 @@ class GutenbergRepo(BaseRepo):
 
     # ── Crawler interface ─────────────────────────────────────────────
 
-    def crawl(self, key: str, *, delay: float = 3.0,
+    def crawl(self, key: str, *, delay: float | None = None,
               force: bool = False, from_cache: bool = False) -> dict | None:
-        """Download, parse, and segment a Gutenberg text."""
+        """Download, parse, and segment a Gutenberg text.
+
+        Raises RepoNotFound when Gutenberg has no such ebook.
+        """
         return self._process_text(key, force=force, from_cache=from_cache)
 
     def _slugify(self, title: str) -> str:
@@ -144,10 +149,8 @@ class GutenbergRepo(BaseRepo):
                f"{gutenberg_id}/pg{gutenberg_id}-images.html")
         logger.info("[%s] fetching %s ...", gutenberg_id, url)
 
-        html = self.http_client.get(url, force=force, from_cache=from_cache,
-                                    timeout=60)
-        if not html:
-            return None
+        html = self.fetch(url, gutenberg_id, force=force,
+                          from_cache=from_cache, timeout=60)
 
         # Extract title from HTML
         title_match = re.search(r"<title>([^<]+)</title>", html, re.IGNORECASE)
@@ -155,6 +158,13 @@ class GutenbergRepo(BaseRepo):
 
         chapters = self._extract_chapters(html)
         logger.info("[%s] extracted %d chapters", gutenberg_id, len(chapters))
+
+        if not chapters:
+            # Gutenberg answered, but nothing citable came out of it. Writing
+            # an empty chapter index would cache this as a successful crawl and
+            # leave every citation into it failing as an "empty extraction".
+            raise RepoNotFound(self.NAME, gutenberg_id,
+                               f"no chapters could be extracted from {url}")
 
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         for i, ch in enumerate(chapters):
