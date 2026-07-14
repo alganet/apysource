@@ -75,6 +75,21 @@ class BaseRepo:
 
         self._crawls: dict[str, CrawlOutcome] = {}
 
+    @property
+    def cache_root(self) -> Path:
+        """Where this repo keeps its documents.
+
+        The registry injects it. A repo constructed outside one, and never given
+        a directory, has nowhere to put anything — better to say so than to
+        raise something obscure deep inside a crawl.
+        """
+        if self.cache_dir is None:
+            raise RuntimeError(
+                f"{type(self).__name__} has no cache_dir; construct it with one, "
+                f"or register it with a RepoRegistry that has a sources_cache_dir",
+            )
+        return self.cache_dir
+
     # ── Source interface ──────────────────────────────────────────────
 
     def url_to_key(self, url: str) -> str | None:

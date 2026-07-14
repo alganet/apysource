@@ -29,3 +29,8 @@ SPDX-License-Identifier = "BSD-3-Clause"
 path = "tests/fixtures/http.wiki"
 SPDX-FileCopyrightText = "Wikipedia contributors"
 SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+[[annotations]]
+path = "tests/fixtures/mdn_origin.md"
+SPDX-FileCopyrightText = "Mozilla Contributors"
+SPDX-License-Identifier = "CC-BY-SA-2.5"
