@@ -8,25 +8,41 @@ SPDX-License-Identifier: ISC
 
 ```python
 from pathlib import Path
-from apysource.yaml_input import load_yaml
-from apysource.verification import run_checks, print_report
-from apysource.repos import RepoRegistry
+from apysource import check_graph, load_yaml
+from apysource.verification import failed, print_report
 
-g = load_yaml(Path("sources.yaml"))
-results = run_checks(g, [{"name": "Fragments", "class_uri": ..., "mode": "chain"}],
-                     RepoRegistry([]))
+results = check_graph(load_yaml(Path("sources.yaml")))
 print_report(results)
+raise SystemExit(1 if failed(results) else 0)
 ```
+
+`check_graph` runs the same checks `apysource check` runs — it reads the same
+`STANDARD_CHECKS` list — and returns results. It never prints and never exits:
+what a failure *means* is the caller's decision. Pass `registry=` / `fetcher=`
+to check against something other than the default wiring.
+
+Citations you generate rather than write need no file on the way in:
+
+```python
+from apysource import check_graph, graph_from_data
+
+results = check_graph(graph_from_data({"sources": [...]}))
+```
+
+`graph_from_data` is `load_yaml` minus the reading, so a generator gets the
+identical validation — unknown keys refused, colliding identities refused —
+without a temp file standing between it and the checker.
 
 Key modules:
 
 ```python
+from apysource.api import check_graph, STANDARD_CHECKS
 from apysource.resolution import resolve_chain, get_text
-from apysource.verification import run_checks, print_report
+from apysource.verification import run_checks, print_report, json_report, failed
 from apysource.repos import BaseRepo, RepoRegistry
 from apysource.graph import load_triples
 from apysource.http import CachedFetcher
-from apysource.yaml_input import load_yaml
+from apysource.yaml_input import load_yaml, graph_from_data
 from apysource.formats import detect_format, extract_content, locate_snippet
 ```
 
@@ -104,16 +120,42 @@ Properties unique to `sv:`:
 | `sv:sourceLines`        | Line range (e.g. `10-20`)                        |
 | `sv:edition`            | Edition or version string                        |
 | `sv:verificationStatus` | `verified`, `failed`, or `pending`               |
+| `sv:citedBy`            | Fragment → a place that cites it                 |
+| `sv:citingFile`         | The file a citation is made in                   |
+| `sv:citingLine`         | The line it is made at (optional)                |
+
+### The citing side
+
+Everything above describes the *cited* side — the document, the section, the
+passage. `sv:CiteSite` is the other end:
+
+```turtle
+ex:host_header a sv:Fragment ;
+    sv:citedBy [
+        a sv:CiteSite ;
+        sv:citingFile "src/rules/client_host_header.rs" ;
+        sv:citingLine 29 ;
+        prov:wasDerivedFrom ex:host_header
+    ] .
+```
+
+The `prov:wasDerivedFrom` edge runs code → spec, and the direction is load-bearing:
+the line of code was written to satisfy the normative sentence, not the other way
+round. `sv:citedBy` is the same edge walked backwards, so a report holding a
+fragment can find its sites without scanning the graph in reverse.
+
+Not to be confused with `sv:sourceLocation` / `sv:sourceLines`, which say where in
+the *cited* document a passage lives. `sv:citingFile` is the opposite axis.
 
 ### Vocabulary design
 
-The `sv:` namespace defines only what has no standard equivalent — 5 classes and 4 properties. Everything else uses established vocabularies directly:
+The `sv:` namespace defines only what has no standard equivalent — 6 classes and 7 properties. Everything else uses established vocabularies directly:
 
 - **Web Annotation (OA)**: Fragments are `oa:Annotation` instances. Source links, selectors, and snippet text all use native OA properties — no wrapper aliases.
 - **Dublin Core (dcterms)**: Source metadata (title, date, language, format, publisher, license) uses DC terms directly.
 - **BIBO**: Bibliographic identifiers (ISBN, DOI, page numbers) use BIBO properties directly.
-- **PROV-O**: Sources are `prov:Entity`. Verification activities use `prov:wasGeneratedBy`, `prov:startedAtTime`, `prov:endedAtTime`.
-- **SHACL**: `vocab/shapes.ttl` validates Sources, Fragments, and Terms.
+- **PROV-O**: Sources are `prov:Entity`. Verification activities use `prov:wasGeneratedBy`, `prov:startedAtTime`, `prov:endedAtTime`. Cite sites are `prov:Entity`, linked by `prov:wasDerivedFrom`.
+- **SHACL**: `vocab/shapes.ttl` validates Sources, Fragments, Terms, and Cite Sites.
 
 ## Advanced: repository modules
 
@@ -275,9 +317,23 @@ apysource check sources.yaml --format json | jq '.checks[].failures[]'
 }
 ```
 
-`label` is what you wrote in the YAML, and is what you route on — if you label a
-fragment with the file that made the claim, the JSON hands that file straight back
-to you. `urn` is the stable identity, and the subject of the provenance graph.
+`label` is what you wrote in the YAML, and is what you route on. `urn` is the
+stable identity, and the subject of the provenance graph.
+
+A failure on a fragment with `cited_by` also carries `cited_by` — the places that
+make the claim, which is what a CI job turns into an annotation on the line that
+has to change. Labelling a fragment with the file that made the claim used to be
+the only way to get this, and it was a poor one: a label is an identity, and
+overloading it with a path meant a fragment could not move without changing its
+name.
+
+```json
+{
+  "label": "client_host_header",
+  "reason": "snippet not found in extracted content",
+  "cited_by": [{"file": "src/rules/client_host_header.rs", "line": 29}]
+}
+```
 
 A snippet failure also carries a `hint`: the passage the source actually contains,
 how similar it was, and which words differ — as fields, not as rendered lines, so

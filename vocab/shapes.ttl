@@ -54,6 +54,25 @@ sv:AnnotationTargetShape a sh:NodeShape ;
         sh:message "Annotation target must link to a sv:Source via oa:hasSource"
     ] .
 
+# ── Cite site shape ───────────────────────────────────────────────────────
+
+sv:CiteSiteShape a sh:NodeShape ;
+    sh:targetClass sv:CiteSite ;
+    sh:property [
+        sh:path sv:citingFile ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "A cite site must name exactly one sv:citingFile — a site with no place is not a place"
+    ] ;
+    sh:property [
+        sh:path sv:citingLine ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:integer ;
+        sh:minInclusive 1 ;
+        sh:message "sv:citingLine, where present, is a 1-based line number"
+    ] .
+
 # ── Term shape ────────────────────────────────────────────────────────────
 
 sv:TermShape a sh:NodeShape ;

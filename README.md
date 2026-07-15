@@ -161,6 +161,59 @@ Each YAML file has a top-level `sources` list. Each source has nested `fragments
 | `location`   | Repo-specific location hint (e.g. `chapter:1`)               |
 | `page_start` | Starting page number (for print sources)                     |
 | `page_end`   | Ending page number (for print sources)                       |
+| `cited_by`   | Where this claim is made — see below                         |
+
+### Who cites it
+
+A source that has moved on only matters because something *relies* on what it
+used to say. `cited_by` names that something, so a failure can point at the
+thing that has to change:
+
+```yaml
+fragments:
+  - label: client_host_header
+    section: "§ 3.2"
+    snippet: "A client MUST send a Host header field ... in all HTTP/1.1 request messages."
+    cited_by:
+      - file: src/rules/client_host_header.rs
+        line: 29
+```
+
+When the quote stops matching, the report ends with the place to open:
+
+```
+  [FAIL] Fragments: snippet verified............. 2/3
+         RFC 9112 (https://www.rfc-editor.org/rfc/rfc9112.txt) (1)
+           client_host_header: snippet not found in extracted content
+             closest match (94% similar, § 3.2)
+               source says: A client MUST send a Host header field ... request messages.
+               not in that passage: response
+             cited by src/rules/client_host_header.rs:29
+```
+
+`file` is required; `line` is optional, because not every citation is made at a
+line of a file — a footnote cites too. In the graph each entry becomes an
+`sv:CiteSite` linked by `prov:wasDerivedFrom` back to the fragment: the citing
+passage is derived from the cited one, not the reverse.
+
+## Library
+
+`apysource check` is one caller of the checks; your own generator can be
+another, without shelling out or reaching into private modules.
+
+```python
+from apysource import check_graph, graph_from_data
+from apysource.verification import failed, print_report
+
+graph = graph_from_data({"sources": [...]})   # load_yaml, minus the file
+results = check_graph(graph)                  # the same checks the CLI runs
+print_report(results)
+raise SystemExit(1 if failed(results) else 0)
+```
+
+`check_graph` returns results; it never prints and never exits. What a failure
+*means* is the caller's decision. `json_report` is there too, and it is the
+same one `--format json` uses.
 
 ## CLI
 

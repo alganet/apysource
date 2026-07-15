@@ -10,12 +10,12 @@ from pathlib import Path
 
 from rdflib import Graph
 
+from apysource.api import check_graph
 from apysource.cli._base import CLIContext, UsageError, pop_flag, pop_value
 from apysource.graph import load_triples
 from apysource.http import CachedFetcher
-from apysource.namespaces import SV
 from apysource.repos import RepoRegistry
-from apysource.verification import failed, json_report, print_report, run_checks
+from apysource.verification import failed, json_report, print_report
 
 
 class CheckSourcesCommand:
@@ -82,16 +82,11 @@ class CheckSourcesCommand:
             print("\n  Loading RDF...", file=sys.stderr)
             g = load_triples(self.ctx.rdf_root)
 
-        checks_config: list[dict[str, object]] = [
-            {"name": "Fragments", "class_uri": SV.Fragment, "mode": "chain"},
-            {"name": "Terms", "class_uri": SV.Term, "mode": "direct"},
-        ]
-
         emit_prov = prov_path is not None
-        results = run_checks(g, checks_config, self.registry,
-                             fetcher=self.fetcher, emit_provenance=emit_prov,
-                             force=force, strict_redirects=strict_redirects,
-                             strict_repos=strict_repos, crawl=not no_crawl)
+        results = check_graph(g, registry=self.registry, fetcher=self.fetcher,
+                              emit_provenance=emit_prov, force=force,
+                              strict_redirects=strict_redirects,
+                              strict_repos=strict_repos, crawl=not no_crawl)
 
         prov_graph = None
         if isinstance(results, tuple):

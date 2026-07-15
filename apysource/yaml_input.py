@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 from rdflib import BNode, Graph, Literal, URIRef
-from rdflib.namespace import DCTERMS, RDF, RDFS
+from rdflib.namespace import DCTERMS, PROV, RDF, RDFS
 
 from apysource.formats import normalize_mime_type
 from apysource.namespaces import BIBO, OA, SCHEMA, SV, new_graph
@@ -109,7 +109,25 @@ _FRAGMENT_KEYS = {
 }
 
 _SOURCE_ALLOWED = set(_SOURCE_KEYS) | {"label", "part_of", "fragments"}
-_FRAGMENT_ALLOWED = set(_FRAGMENT_KEYS) | {"label", "snippet", "selector", "section"}
+_FRAGMENT_ALLOWED = (set(_FRAGMENT_KEYS)
+                     | {"label", "snippet", "selector", "section", "cited_by"})
+
+# Keys of one entry of a fragment's ``cited_by`` list.
+_CITE_SITE_ALLOWED = {"file", "line"}
+
+#: What a source may say, and what a fragment may say — as data, on purpose.
+#:
+#: A tool that *generates* citations has to know what it is allowed to emit, and
+#: the honest way to tell it is to say so. The alternative is that it reads the
+#: private name, or keeps its own copy — and a second copy of this list is how a
+#: generator ends up emitting a key this loader silently stopped accepting.
+SOURCE_KEYS = frozenset(_SOURCE_ALLOWED)
+FRAGMENT_KEYS = frozenset(_FRAGMENT_ALLOWED)
+
+#: The fragment keys that *select a passage*: everything a citation can say about
+#: where in the source its quote lives. `label` names the citation, `snippet` is
+#: the quote itself, and `cited_by` is the citing side — none of them target.
+TARGETTING_KEYS = FRAGMENT_KEYS - {"label", "snippet", "cited_by"}
 
 
 def _reject_unknown_keys(entry: dict, allowed: set[str], what: str) -> None:
@@ -196,6 +214,65 @@ def _emit_oa_target(g: Graph, frag_uri: URIRef, source_uri: URIRef,
         g.add((fs, RDF.value, Literal(_text(section, f"{what}: section"))))
 
 
+def _emit_cite_sites(g: Graph, frag_uri: URIRef, frag_def: dict[str, object],
+                     what: str) -> None:
+    """Emit the *citing* side: the places that make this claim.
+
+    ``prov:wasDerivedFrom`` points from the cite site to the fragment, and that
+    direction is the true one — the line of code was derived from the normative
+    sentence, not the other way round. ``sv:citedBy`` is the same edge walked
+    backwards, so a report holding a fragment can find its sites without a
+    reverse scan of the graph.
+
+    A ``cited_by:`` written as a single mapping rather than a list of them is
+    refused rather than wrapped. Guessing would be free here, and it is exactly
+    the guess that turns one dropped entry into a citation nobody is told about.
+    """
+    sites = frag_def.get("cited_by")
+    if sites is None:
+        return
+
+    if not isinstance(sites, list):
+        raise ValueError(
+            f"{what}: cited_by must be a list of places, not a "
+            f"{type(sites).__name__}. Write it as a list even when there is "
+            f"only one — a single mapping is one entry away from silently "
+            f"becoming none.",
+        )
+
+    for i, site in enumerate(sites, 1):
+        where = f"{what}: cited_by[{i}]"
+        if not isinstance(site, dict):
+            raise ValueError(
+                f"{where} must be a mapping with a 'file', not a "
+                f"{type(site).__name__}.",
+            )
+        _reject_unknown_keys(site, _CITE_SITE_ALLOWED, where)
+
+        file = site.get("file")
+        if not file:
+            raise ValueError(
+                f"{where}: a cite site must name the 'file' it is in. A site "
+                f"with no place is not a place.",
+            )
+
+        node = BNode()
+        g.add((node, RDF.type, SV.CiteSite))
+        g.add((node, SV.citingFile, Literal(_text(file, f"{where}: file"))))
+        g.add((node, PROV.wasDerivedFrom, frag_uri))
+        g.add((frag_uri, SV.citedBy, node))
+
+        line = site.get("line")
+        if line is not None:
+            # bool is an int in Python, and `line: true` is not line 1.
+            if not isinstance(line, int) or isinstance(line, bool):
+                raise ValueError(
+                    f"{where}: line must be a whole number, not a "
+                    f"{type(line).__name__}.",
+                )
+            g.add((node, SV.citingLine, Literal(line)))
+
+
 def load_yaml(path: Path) -> Graph:
     """Load a YAML sources file and return an rdflib Graph.
 
@@ -203,10 +280,21 @@ def load_yaml(path: Path) -> Graph:
     Each source may have a nested ``fragments`` list.
     """
     text = Path(path).read_text(encoding="utf-8")
-    data = yaml.safe_load(text)
+    return graph_from_data(yaml.safe_load(text), origin=str(path))
 
+
+def graph_from_data(data: object, origin: str = "<data>") -> Graph:
+    """Mint a graph from already-parsed sources data.
+
+    The same loader ``load_yaml`` runs, minus the reading — so a caller that
+    already holds the data (a generator emitting citations, a test) gets the
+    identical validation without writing a file first. ``origin`` names the
+    data in error messages; it is the path when there is one.
+
+    There is one definition of what a sources file means, and this is it.
+    """
     if not isinstance(data, dict) or "sources" not in data:
-        raise ValueError(f"YAML file must contain a top-level 'sources' list: {path}")
+        raise ValueError(f"YAML file must contain a top-level 'sources' list: {origin}")
 
     g = new_graph()
     minter = _Minter()
@@ -277,5 +365,8 @@ def load_yaml(path: Path) -> Graph:
 
             # OA Web Annotation triples (source link + selectors)
             _emit_oa_target(g, frag_uri, source_uri, frag_def, what_frag)
+
+            # PROV triples for the citing side (file and line)
+            _emit_cite_sites(g, frag_uri, frag_def, what_frag)
 
     return g

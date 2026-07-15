@@ -22,7 +22,7 @@ from apysource.graph import local_name
 from apysource.namespaces import PROV, SV
 from apysource.repos import RepoRegistry
 from apysource.resolution import _get_snippet, load_text, resolve_chain, resolve_direct
-from apysource.results import CheckResult, Failure, FetcherResult, RepoResult
+from apysource.results import CheckResult, CiteSite, Failure, FetcherResult, RepoResult
 
 #: Minimum extracted-content length (in characters) to treat as a usable
 #: extraction. Below this, the snippet/extraction check fails rather than
@@ -61,6 +61,39 @@ def _failure(result: Any, uri: URIRef, reason: str,
         url=result.url,
         urn=str(uri),
     )
+
+
+def _cite_sites(g: Graph, urn: str) -> list[CiteSite]:
+    """The places that make this fragment's claim, as the graph holds them."""
+    if not urn:
+        return []
+
+    sites = []
+    for node in g.objects(URIRef(urn), SV.citedBy):
+        file = g.value(node, SV.citingFile)
+        if file is None:
+            continue
+        line = g.value(node, SV.citingLine)
+        sites.append(CiteSite(file=str(file),
+                              line=int(str(line)) if line is not None else None))
+
+    return sorted(sites, key=lambda s: (s.file, s.line if s.line else 0))
+
+
+def _attach_cite_sites(g: Graph, checks: list[CheckResult]) -> None:
+    """Tell every failure where it is cited from.
+
+    Done once, over the finished results, rather than at each of the dozen
+    places a Failure is raised — so a new check cannot forget to do it, and the
+    report cannot end up knowing this about some failures and not others.
+
+    Only fragment-level records carry a URN. A redirected URL or an unreachable
+    repo is a finding about a *source*, which many fragments may cite; naming
+    one of them would be a claim the graph does not support.
+    """
+    for check in checks:
+        for record in (*check.failures, *check.warnings):
+            record.cited_by = _cite_sites(g, record.urn)
 
 
 def _redirect_check(name: str, results: list[Any],
@@ -311,6 +344,8 @@ def run_checks(
     if repos.total:
         results.append(repos)
 
+    _attach_cite_sites(g, results)
+
     if emit_provenance and prov_graph is not None and activity is not None:
         now = datetime.now(timezone.utc)
         prov_graph.add((activity, PROV.endedAtTime,
@@ -523,6 +558,10 @@ def _print_records(records: list[Failure]) -> None:
             if f.hint is not None:
                 for line in render(f.hint):
                     print(f"             {line}")
+            # The thing that has to change now. Printed last, under the
+            # diagnosis, because it is what the reader does about it.
+            for site in f.cited_by:
+                print(f"             cited by {site}")
 
 
 def verdict(check: CheckResult) -> str:
@@ -633,6 +672,10 @@ def _record_json(f: Failure) -> dict[str, Any]:
         # reader of the JSON would actually look at.
         hint["percent"] = f.hint.percent
         record["hint"] = hint
+    if f.cited_by:
+        # The key a CI job routes on: it is what turns a failing check into an
+        # annotation on the line that has to change.
+        record["cited_by"] = [asdict(site) for site in f.cited_by]
     return record
 
 

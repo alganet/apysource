@@ -139,6 +139,32 @@ class Redirect:
 # ── Verification results ────────────────────────────────────────────────
 
 @dataclass
+class CiteSite:
+    """Where a citation is made — the other end of the citation.
+
+    Everything else here describes the *cited* side: the document, the section,
+    the passage. This is the *citing* side, and until now the tool threw it
+    away. A fragment's label was the only trace of who was making the claim,
+    and the label is a slug: ``client_host_header`` is not a place, and nobody
+    can go and look at it.
+
+    A source that has moved on is only interesting because something *relies*
+    on what it used to say. Carrying the file and line means a failure can name
+    the thing that has to change, rather than leaving the reader to grep for a
+    quote that, by then, no longer exists anywhere to grep for.
+
+    ``line`` is optional: not every citation is made at a line of a file. A
+    footnote cites too.
+    """
+
+    file: str
+    line: int | None = None
+
+    def __str__(self) -> str:
+        return f"{self.file}:{self.line}" if self.line is not None else self.file
+
+
+@dataclass
 class Failure:
     """A single verification failure.
 
@@ -156,6 +182,11 @@ class Failure:
     source actually contains, and how it differs from what was cited. It
     is kept as data, not as rendered lines, so a machine-readable report
     can serve it without parsing prose back apart.
+
+    ``cited_by`` names the places that make this claim, when the graph knows
+    them. It is what turns "a fragment failed" into "this line of your code
+    is now wrong", which is the only form of the finding anyone can act on.
+    Empty means the graph was never told, not that nothing cites it.
     """
 
     group: str
@@ -164,6 +195,7 @@ class Failure:
     hint: Diagnosis | None = None
     url: str = ""
     urn: str = ""
+    cited_by: list[CiteSite] = field(default_factory=list)
 
 
 @dataclass

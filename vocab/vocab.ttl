@@ -73,6 +73,11 @@ sv:VerificationActivity a owl:Class ;
     rdfs:comment "A verification run performed by apysource. Linked from fragments via prov:wasGeneratedBy. Timestamps on prov:startedAtTime/endedAtTime." ;
     rdfs:subClassOf prov:Activity .
 
+sv:CiteSite a owl:Class ;
+    rdfs:label "Cite Site" ;
+    rdfs:comment "A place that makes a citation — the citing side, as opposed to the cited document. Linked from the fragment via sv:citedBy, and back to it via prov:wasDerivedFrom (the citing passage is derived from the cited one, not the reverse). Carries sv:citingFile and, where there is one, sv:citingLine. A source that has changed matters because something relies on what it used to say; this names that something." ;
+    rdfs:subClassOf prov:Entity .
+
 # ══════════════════════════════════════════════════════════════════════════
 # Properties (only those with no standard equivalent)
 # ══════════════════════════════════════════════════════════════════════════
@@ -92,6 +97,24 @@ sv:edition a owl:DatatypeProperty ;
     rdfs:comment "Edition or version of the source document." ;
     rdfs:range xsd:string ;
     rdfs:domain sv:Source .
+
+sv:citedBy a owl:ObjectProperty ;
+    rdfs:label "cited by" ;
+    rdfs:comment "Links a fragment to a place that cites it. The inverse edge, prov:wasDerivedFrom, is the one that carries the meaning; this one exists so a report holding a fragment can find its sites without scanning the graph backwards." ;
+    rdfs:domain sv:Fragment ;
+    rdfs:range sv:CiteSite .
+
+sv:citingFile a owl:DatatypeProperty ;
+    rdfs:label "citing file" ;
+    rdfs:comment "The file a citation is made in, as a path relative to the citing project's root. Not to be confused with sv:sourceLocation or sv:sourceLines, which describe where in the *cited* document a passage lives; this is the opposite axis." ;
+    rdfs:range xsd:string ;
+    rdfs:domain sv:CiteSite .
+
+sv:citingLine a owl:DatatypeProperty ;
+    rdfs:label "citing line" ;
+    rdfs:comment "The 1-based line of sv:citingFile the citation is made at. Optional: not every citation is made at a line of a file." ;
+    rdfs:range xsd:integer ;
+    rdfs:domain sv:CiteSite .
 
 sv:verificationStatus a owl:DatatypeProperty ;
     rdfs:label "verification status" ;

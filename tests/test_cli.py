@@ -281,8 +281,10 @@ def test_check_sources_accepts_the_repo_flags(capsys):
                      sources_cache_subdir="data/sources")
     cmd = CheckSourcesCommand(ctx=ctx, registry=EMPTY_REGISTRY)
 
-    with patch("apysource.cli.check_sources.run_checks",
-               return_value=[]) as run:
+    # Patched where the checker is *called from*, not where the CLI happens to
+    # import it: the promise is that the flag reaches the thing that does the
+    # checking, however many layers sit in between.
+    with patch("apysource.api.run_checks", return_value=[]) as run:
         with pytest.raises(SystemExit):
             cmd.run(graph=g, args=["--strict-repos", "--no-crawl"])
 
@@ -299,8 +301,10 @@ def test_check_sources_crawls_by_default(capsys):
                      sources_cache_subdir="data/sources")
     cmd = CheckSourcesCommand(ctx=ctx, registry=EMPTY_REGISTRY)
 
-    with patch("apysource.cli.check_sources.run_checks",
-               return_value=[]) as run:
+    # Patched where the checker is *called from*, not where the CLI happens to
+    # import it: the promise is that the flag reaches the thing that does the
+    # checking, however many layers sit in between.
+    with patch("apysource.api.run_checks", return_value=[]) as run:
         with pytest.raises(SystemExit):
             cmd.run(graph=g, args=[])
 
