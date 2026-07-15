@@ -60,7 +60,14 @@ def main() -> None:
         for i, arg in enumerate(remaining):
             if arg.endswith((".yaml", ".yml")):
                 from apysource.yaml_input import load_yaml
-                graph = load_yaml(Path(arg))
+                try:
+                    graph = load_yaml(Path(arg))
+                except ValueError as e:
+                    # A malformed citations file is the author's mistake, not a
+                    # crash. Say what is wrong with it, in one line they can act
+                    # on, and stop — rather than spraying a traceback.
+                    print(f"Error in {arg}: {e}", file=sys.stderr)
+                    sys.exit(1)
                 remaining = remaining[:i] + remaining[i + 1:]
                 break
 

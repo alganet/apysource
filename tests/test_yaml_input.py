@@ -261,3 +261,161 @@ def test_error_missing_url(tmp_path):
 def test_error_missing_fragment_label(tmp_path):
     with pytest.raises(ValueError, match="label"):
         load_yaml(_write_yaml(tmp_path, MISSING_FRAG_LABEL_YAML))
+
+
+# ── An identity is an identity (the URN-collision tranche) ───────────────
+
+def _write(tmp_path, text):
+    p = tmp_path / "sources.yaml"
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+_TWO_FRAGMENTS = """
+sources:
+  - label: "RFC 9110"
+    url: "https://example.com/spec"
+    type: text/plain
+    fragments:
+      - label: "{a}"
+        snippet: "a quote that is genuinely in the source somewhere"
+      - label: "{b}"
+        snippet: "a fabrication that appears in no document anywhere"
+"""
+
+
+def test_two_labels_that_mint_one_urn_are_refused(tmp_path):
+    """The worst outcome this tool can produce, and it shipped.
+
+    `_slugify` collapses every run of non-alphanumeric characters to `_`, so
+    `rules/host_header` and `rules-host-header` are one URN. RDF being a set,
+    the two fragments silently became **one**, carrying both snippets — and
+    `_get_snippet` reads one of them with `g.value()`, which picks arbitrarily.
+
+    The fabricated quote verified **green**, because the arbitrary pick landed
+    on the other fragment's honest snippet. One citation was checked twice and
+    the other was not checked at all.
+    """
+    path = _write(tmp_path, _TWO_FRAGMENTS.format(a="rules/host_header",
+                                                  b="rules-host-header"))
+    with pytest.raises(ValueError, match="identity collision"):
+        load_yaml(path)
+
+
+def test_the_same_label_twice_is_refused(tmp_path):
+    """Two entries with one identity are one entry; the second would vanish."""
+    path = _write(tmp_path, _TWO_FRAGMENTS.format(a="expires", b="expires"))
+    with pytest.raises(ValueError, match="duplicate fragment"):
+        load_yaml(path)
+
+
+def test_two_source_labels_that_mint_one_urn_are_refused(tmp_path):
+    """Worse than the fragment case: the snippet is checked against the wrong
+    *document*. Two colliding sources merge, carrying two schema:url, and
+    `_resolve_source_url` takes one arbitrarily — so a citation can be verified
+    against a document it does not name, and the one it does name is never
+    fetched.
+    """
+    path = _write(tmp_path, """
+sources:
+  - label: "RFC 9110"
+    url: "https://example.com/2024"
+    type: text/plain
+    fragments:
+      - label: "one"
+        snippet: "a quote long enough to be taken seriously"
+  - label: "RFC-9110"
+    url: "https://example.com/2025"
+    type: text/plain
+    fragments:
+      - label: "two"
+        snippet: "another quote long enough to be taken seriously"
+""")
+    with pytest.raises(ValueError, match="identity collision"):
+        load_yaml(path)
+
+
+def test_a_non_ascii_label_keeps_its_letters(tmp_path):
+    """`[^a-z0-9]` erased every character of a Cyrillic label, so three
+    fragments minted one empty URN between them and two citations vanished.
+    """
+    path = _write(tmp_path, """
+sources:
+  - label: "Устав"
+    url: "https://example.com/spec"
+    type: text/plain
+    fragments:
+      - label: "Преамбула"
+        snippet: "a quote long enough to be taken seriously here"
+      - label: "Введение"
+        snippet: "another quote long enough to be taken seriously"
+""")
+    g = load_yaml(path)
+    urns = {str(f) for f in g.subjects(RDF.type, SV.Fragment)}
+    assert len(urns) == 2, f"two fragments must have two identities, got {urns}"
+    assert all(u != "urn:apysource:fragment_" for u in urns)
+
+
+# ── Nothing the author wrote is thrown away ──────────────────────────────
+
+def test_an_unknown_key_is_refused(tmp_path):
+    """`snipet:` loaded without a murmur and the citation verified nothing."""
+    path = _write(tmp_path, """
+sources:
+  - label: "S"
+    url: "https://example.com/x"
+    fragments:
+      - label: "f"
+        snipet: "the quote the author actually wrote down"
+""")
+    with pytest.raises(ValueError, match="unknown key"):
+        load_yaml(path)
+
+
+def test_a_snippet_written_as_a_list_is_refused(tmp_path):
+    """It was stored as its Python repr and could never match anything."""
+    path = _write(tmp_path, """
+sources:
+  - label: "S"
+    url: "https://example.com/x"
+    fragments:
+      - label: "f"
+        snippet:
+          - "line one of the quote"
+          - "line two of the quote"
+""")
+    with pytest.raises(ValueError, match="single piece of text"):
+        load_yaml(path)
+
+
+def test_a_section_of_zero_is_not_dropped(tmp_path):
+    """`if section:` dropped `section: 0` — and a dropped section is a false
+    pass, because the quote is then matched against the whole document.
+    """
+    path = _write(tmp_path, """
+sources:
+  - label: "S"
+    url: "https://example.com/x"
+    fragments:
+      - label: "f"
+        section: 0
+        snippet: "a quote long enough to be taken seriously"
+""")
+    g = load_yaml(path)
+    values = {str(v) for v in g.objects(None, RDF.value)}
+    assert "0" in values, "the section the author wrote must reach the graph"
+
+
+def test_a_part_of_that_names_nothing_is_refused(tmp_path):
+    """A typo'd parent silently unhooked the source from its book."""
+    path = _write(tmp_path, """
+sources:
+  - label: "Chapter"
+    url: "https://example.com/x"
+    part_of: "The Bok"
+    fragments:
+      - label: "f"
+        snippet: "a quote long enough to be taken seriously"
+""")
+    with pytest.raises(ValueError, match="not a source in this file"):
+        load_yaml(path)
