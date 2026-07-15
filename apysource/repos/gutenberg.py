@@ -16,6 +16,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from apysource.formats import html_text, normalize_ws
 from apysource.repos._base import (
     BaseRepo,
     RepoNotFound,
@@ -212,16 +213,22 @@ class GutenbergRepo(BaseRepo):
         current_title = "Preamble"
         current_parts = []
 
+        # Rendered exactly as every other HTML in this codebase is rendered.
+        # This used `get_text(strip=True)`, which joins stripped strings with
+        # nothing: a paragraph with any inline markup came out as
+        # "Call meIshmael." — and because a repo renders at *crawl* time, that
+        # was written into the cache, so no quote from it could ever verify and
+        # fixing the code alone would not free an existing cache of it.
         for element in soup.find_all(["h2", "h3", "h4", "p", "blockquote"]):
             if element.name in ("h2", "h3", "h4"):
                 if current_parts:
                     text = "\n\n".join(current_parts)
                     if len(text.strip()) > 50:
                         chapters.append({"title": current_title, "text": text})
-                current_title = element.get_text(strip=True)
+                current_title = normalize_ws(html_text(element))
                 current_parts = []
             elif element.name in ("p", "blockquote"):
-                text = element.get_text(strip=True)
+                text = normalize_ws(html_text(element))
                 if text and len(text) > 10:
                     current_parts.append(text)
 

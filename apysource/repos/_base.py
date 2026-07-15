@@ -216,10 +216,19 @@ def slugify(text: str) -> str:
 def extract_content_with_fallback(
     text: str, location: str, *, threshold: int = SMALL_FILE_THRESHOLD,
 ) -> str:
-    """Common extract_content pattern: try line range, then small-file fallback."""
+    """Common extract_content pattern: try line range, then small-file fallback.
+
+    A document nobody asked to narrow is returned whole, however long it is.
+    It used to be cut off at ``threshold`` and come back as ``""`` — reported as
+    "empty extraction (0 chars)" for a document that was not empty at all, just
+    longer than five thousand characters, which is to say: almost any real page.
+    The citation was blamed for the size of its source.
+    """
     result = extract_line_range(text, location)
     if result is not None:
         return result
+    if not location.strip():
+        return text
     if len(text) < threshold:
         return text
     return ""

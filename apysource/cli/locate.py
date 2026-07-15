@@ -93,12 +93,17 @@ def find_snippet(http_client, url: str, snippet: str,
 def _searchable_text(body: str, fmt) -> str:
     """The document as the snippet would have to match it.
 
-    Markup is stripped where the format knows how, so a hint diffs against
-    prose rather than against tags.
+    The format's own answer to "what does this document say" — the same one
+    ``check`` matches against. This used to reach for ``strip_tags``, which only
+    ``HtmlFormat`` has, so every other format diffed against the **raw body**:
+    an RFC hint quoted `[Page 42]` pagination furniture that ``check``'s
+    document does not contain, and ``locate`` refused citations that ``check``
+    would have verified. A hint is a claim about the source, and it must be a
+    claim about the source that was actually read.
     """
-    strip_tags = getattr(fmt, "strip_tags", None)
-    if strip_tags is not None:
-        return str(strip_tags(body))
+    text = getattr(fmt, "text", None)
+    if text is not None:
+        return str(text(body))
     return body
 
 

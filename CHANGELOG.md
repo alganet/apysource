@@ -13,6 +13,30 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **An HTML page is now checked as a reader sees it, not as markup.** A fragment with no
+  `selector:`/`section:` was matched against the raw HTML, so a sentence lifted from a
+  `<meta name="description">` — or from inside a `<script>` — verified against a page whose prose
+  said something else entirely, while the prose a reader *had* seen did not match at all. Exactly
+  inverted: it passed text nobody was ever shown and failed text they were. Extraction with no
+  locator now yields the rendered text, with `<head>`, `<script>` and `<style>` left out of it.
+- **`add` no longer writes citations that `check` rejects.** `HtmlFormat.extract` rendered a
+  selected element with `get_text(strip=True)`, which joins stripped strings with nothing:
+  `<p>The <code>Origin</code> request header…</p>` came out as `TheOriginrequest header…`. But
+  `locate` — the function that *generates* the selectors `extract` consumes — read the same page
+  with a plain `get_text()`. So `apysource add` emitted a fragment that `apysource check` failed on
+  the very next run, for any sentence containing a link, `<code>` or `<em>`: most prose in a web
+  specification. Both now render through one function, and `locate` additionally *proves* the
+  selector it returns leads back to the snippet before returning it, so no future divergence can
+  reopen this. Whitespace is inserted only at block boundaries, where a browser also breaks the
+  line, and never between inline elements — `<b>Sub</b>string` stays `Substring`, because inventing
+  a space would manufacture a passing citation for prose the page never showed.
+- **`locate` on a large document was quadratic.** It re-normalized a growing prefix of the whole
+  file once per line: 11 seconds on a 422 KB RFC, which is exactly the kind of document this tool
+  exists to cite. It is now a single pass — 0.011 s, same answer.
+- A whole-document RFC citation no longer trips over pagination. `[Page 42]` footers and form feeds
+  were left in the text a snippet was matched against, so a sentence straddling a page break could
+  not be quoted at all; `sections` had always removed them, and whole-document extraction now
+  agrees.
 - **A snippet is now looked for in the whole source, not in the first 100,000 characters of it.**
   RFC 9110 is 502,907 characters, so the check read a fifth of it: a real citation into its
   status-code definitions was reported as `snippet not found in extracted content` — a flat claim
