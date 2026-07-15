@@ -118,6 +118,27 @@ def _resolve_source_url(g: Graph, source: URIRef, depth: int = 3) -> str:
     return ""
 
 
+def _targeting(g: Graph, frag_uri: URIRef,
+               format_holder: URIRef) -> tuple[str, str | None]:
+    """What this fragment says to target, and in what format.
+
+    Read the same way no matter who will serve the document. It used to be read
+    only on the fetcher branch, so a ``section:`` on a repo-backed fragment was
+    dropped without a word — and a fragment naming a section the document does
+    not have verified **green**, because the repo handed back the whole page and
+    the snippet turned up somewhere in it. Whether a citation was checked against
+    the section it named depended on whether a repo happened to claim its URL.
+    """
+    section = _get_selector_value(g, frag_uri, SV.SectionSelector)
+    if section:
+        return "section", section
+
+    format_name = str(g.value(format_holder, DCTERMS.format) or "")
+    css = _get_selector_value(g, frag_uri, OA.CssSelector)
+    lines = str(g.value(frag_uri, SV.sourceLines) or "")
+    return format_name, (css or lines) or None
+
+
 def resolve_chain(g: Graph, frag_uri: URIRef, registry: RepoRegistry,
                    fetcher: CachedFetcher | None = None) -> ResolveResult:
     """Resolve a fragment via OA target chain: Fragment → hasTarget → hasSource → url."""
@@ -134,6 +155,8 @@ def resolve_chain(g: Graph, frag_uri: URIRef, registry: RepoRegistry,
     if not url:
         return ResolveResult(status="no_url", label=label, source=source_label)
 
+    format_name, locator = _targeting(g, frag_uri, source)
+
     repo, key, cache_file, fallback = _resolve_repo(registry, url, location)
     if repo is not None:
         return RepoResult(
@@ -141,18 +164,10 @@ def resolve_chain(g: Graph, frag_uri: URIRef, registry: RepoRegistry,
             label=label, location=location, source=source_label,
             url=url, module=repo.NAME, repo=repo, key=key,
             cache_file=str(cache_file) if cache_file else None,
+            format_name=format_name, locator=locator,
         )
 
     if fetcher:
-        section = _get_selector_value(g, frag_uri, SV.SectionSelector)
-        if section:
-            format_name = "section"
-            locator: str | None = section
-        else:
-            format_name = str(g.value(source, DCTERMS.format) or "")
-            css = _get_selector_value(g, frag_uri, OA.CssSelector)
-            lines = str(g.value(frag_uri, SV.sourceLines) or "")
-            locator = (css or lines) or None
         matched = registry.get_repo(url)
         return FetcherResult(
             status="resolved", label=label, location=location,
@@ -179,6 +194,8 @@ def resolve_direct(g: Graph, entity_uri: URIRef, registry: RepoRegistry,
     if not url:
         return ResolveResult(status="no_url", label=label)
 
+    format_name, locator = _targeting(g, entity_uri, entity_uri)
+
     repo, key, cache_file, fallback = _resolve_repo(registry, url, location)
     if repo is not None:
         return RepoResult(
@@ -186,18 +203,10 @@ def resolve_direct(g: Graph, entity_uri: URIRef, registry: RepoRegistry,
             url=url, location=location, module=repo.NAME,
             repo=repo, key=key,
             cache_file=str(cache_file) if cache_file else None,
+            format_name=format_name, locator=locator,
         )
 
     if fetcher:
-        section = _get_selector_value(g, entity_uri, SV.SectionSelector)
-        if section:
-            format_name = "section"
-            locator: str | None = section
-        else:
-            format_name = str(g.value(entity_uri, DCTERMS.format) or "")
-            css = _get_selector_value(g, entity_uri, OA.CssSelector)
-            lines = str(g.value(entity_uri, SV.sourceLines) or "")
-            locator = (css or lines) or None
         matched = registry.get_repo(url)
         return FetcherResult(
             status="resolved", label=label, url=url, location=location,
@@ -265,6 +274,24 @@ def _load_repo_text(result: RepoResult, max_chars: int | None, *,
         text = repo.extract_content(result.location, path)
     else:
         text = path.read_text(encoding="utf-8", errors="replace")
+
+    # And now the fragment's own targeting, through the very same function the
+    # fetcher path uses. `location:` is the repo's own hint — which chapter, which
+    # lines — and the repo has just honoured it. A `section:` is a claim about
+    # the *document*, and section parsing is format-level, so it applies just as
+    # well to the text a repo returned as to a page that was fetched.
+    #
+    # Skipping this was a false pass: `section: "Chapter Nine Hundred"` on an MDN
+    # URL verified green, because the repo returned the whole page and the
+    # snippet was found somewhere in it. The identical fragment on a fetched URL
+    # failed, correctly. Which answer you got depended on who served the file.
+    if result.locator:
+        try:
+            text = extract_content(text, result.locator,
+                                   format_name=result.format_name, strict=True)
+        except SectionNotFound as e:
+            return TextOutcome("", "no_section", e.message)
+
     return TextOutcome(truncate(text, max_chars))
 
 

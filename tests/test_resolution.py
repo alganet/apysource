@@ -640,3 +640,84 @@ def test_the_citation_keeps_the_anchor_the_author_wrote(tmp_path):
     g, frag = _chain(url)
     result = resolve_chain(g, frag, EMPTY_REGISTRY, fetcher=MockFetcher())
     assert result.url == url
+
+
+# ── A repo honours the fragment's targeting, like everyone else ──────────
+
+def _repo_with(tmp_path, body, name="mock"):
+    """A repo serving one document, so we can test what happens after it."""
+    (tmp_path / "doc.md").write_text(body)
+
+    class Repo(BaseRepo):
+        NAME = name
+
+        def url_to_key(self, url):
+            return "doc"
+
+        def resolve_location(self, loc, key):
+            p = self.cache_root / "doc.md"
+            return p if p.exists() else None
+
+    return Repo(cache_dir=tmp_path, url_pattern=r"example\.com",
+                base_url="https://example.com")
+
+
+_DOC = ("# Origin header\nThe HTTP Origin request header indicates the origin.\n\n"
+        "## Syntax\nOrigin: null\n\n"
+        "## Directives\nA directive is a thing.\n")
+
+
+def _section_fragment(section):
+    frag = URIRef("urn:test:frag")
+    g = build_chain_graph(frag, URIRef("urn:test:src"),
+                          "https://example.com/doc", location="")
+    target = g.value(frag, OA.hasTarget)
+    sel = BNode()
+    g.add((target, OA.hasSelector, sel))
+    g.add((sel, RDF.type, SV.SectionSelector))
+    g.add((sel, RDF.value, Literal(section)))
+    return g, frag
+
+
+def test_a_section_that_does_not_exist_fails_on_the_repo_path_too(tmp_path):
+    """It verified GREEN. This is the worst defect the audit turned up.
+
+    A repo was handed only `location:`; a `section:` was dropped without a word.
+    So `section: "Chapter Nine Hundred"` — naming a section the document does
+    not have — passed, because the repo returned the whole page and the snippet
+    was found somewhere in it. The identical fragment on a *fetched* URL failed
+    correctly. Which answer you got depended on who served the file.
+    """
+    repo = _repo_with(tmp_path, _DOC)
+    g, frag = _section_fragment("Chapter Nine Hundred")
+
+    result = resolve_chain(g, frag, RepoRegistry([repo]), fetcher=MockFetcher())
+    assert isinstance(result, RepoResult)
+
+    outcome = load_text(result, max_chars=None)
+    assert outcome.status == "no_section", \
+        f"a nonexistent section must not extract anything, got {outcome.text!r}"
+    assert "Chapter Nine Hundred" in outcome.reason
+
+
+def test_a_repo_section_scopes_the_snippet_like_a_fetched_one(tmp_path):
+    """And the flip side: the section must actually *narrow* the text.
+
+    Otherwise the quote is matched against the whole page and section targeting
+    is decorative — which is precisely what it was.
+    """
+    repo = _repo_with(tmp_path, _DOC)
+    registry = RepoRegistry([repo])
+    sentence = "The HTTP Origin request header indicates the origin."
+
+    g, frag = _section_fragment("Origin header")
+    right = load_text(resolve_chain(g, frag, registry, fetcher=MockFetcher()),
+                      max_chars=None)
+    assert right.status == "ok" and sentence in right.text
+
+    g, frag = _section_fragment("Syntax")
+    wrong = load_text(resolve_chain(g, frag, registry, fetcher=MockFetcher()),
+                      max_chars=None)
+    assert wrong.status == "ok"
+    assert sentence not in wrong.text, \
+        "the sentence is not in § Syntax; the section must scope the match"

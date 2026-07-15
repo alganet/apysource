@@ -35,6 +35,15 @@ class RepoResult(ResolveResult):
     not that this is not a repo's document. Routing is decided by the URL the
     citation names, never by what happens to be on disk — otherwise a cold
     cache silently changes *which document* is the source of truth.
+
+    ``format_name``/``locator`` carry the fragment's own targeting — a
+    ``section:`` or a ``selector:`` — exactly as they do for a fetched source.
+    A repo used to be handed only ``location:``, and everything else was
+    dropped on the floor: a fragment naming a section the document does not
+    have verified **green**, because the repo returned the whole page and the
+    snippet was found somewhere in it. Whether a citation was checked against
+    the section it named came down to whether some repo happened to claim
+    its URL.
     """
 
     location: str = ""
@@ -42,6 +51,8 @@ class RepoResult(ResolveResult):
     repo: BaseRepo | None = None
     key: str = ""
     cache_file: str | None = None
+    format_name: str = ""
+    locator: str | None = None
 
 
 @dataclass
