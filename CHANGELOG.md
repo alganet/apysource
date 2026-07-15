@@ -12,96 +12,7 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-### Fixed
-- **`apysource add <name>` fetched the wrong document when an entry pinned that name to its own URL.**
-  It minted the URL from the pattern and ignored the entry, so a file pinning `RFC 9110` to
-  datatracker had its snippet located in rfc-editor's *plain text* and the resulting locator written
-  into the *HTML* entry — a targetter `check` would then apply to a document it was never measured
-  from. `add` now resolves through `complete()`, the same entry-wins rule `check` uses.
-- **`apysource add` no longer overwrites a file it cannot read.** A sources file that existed but had
-  no top-level `sources:` (a typo'd `source:`, say) was treated as empty and then replaced, costing
-  the author everything else in it. It is refused instead.
-- **A pattern template with an unbalanced or an escaped brace was mis-validated.** The load-time check
-  scanned with a regex instead of `string.Formatter`, so `https://e.org/{n}/{` passed it and then
-  raised out of `str.format` at mint time — the very deferred failure the check exists to prevent —
-  while a correctly escaped `{{lit}}` was falsely refused.
-- **An optional capture group that did not match interpolated the word `"None"` into the URL.**
-  `^RFC (?P<n>\d+)(?P<sfx>bis)?$` minted `.../rfc9110None.txt` and fetched it. A group that did not
-  participate is the empty string now.
-- **`Archive <item>` accepted a name with a slash in it and then fetched a different item.** The
-  family allowed `.+` while `url_pattern` stops the key at the first `/`, so `Archive foo/bar` was
-  claimed, keyed as `foo`, and verified against the wrong document with nothing to say so.
-- **`SourceSet.entries` no longer aliases the data it was given.** `complete()` returned the caller's
-  own dict when the entry already had a URL and a fresh one when it minted — two ownership rules for
-  one return type, so a consumer editing a resolved entry silently edited the document it had read.
-- **A section selector now names the section the passage is actually in.** `locate` looked for
-  *the shortest selector that extracts text containing the snippet* — and that objective quietly
-  guarantees the wrong answer, because a section always contains its subsections' text and always
-  has the shorter label. A passage living in § 4.2.1 was cited as § 4.2. On RFC 9110 that happened
-  to **157 of 271** paragraphs; every one of them round-tripped, which is why nothing caught it.
-  It is not a cosmetic imprecision: the scope the citation is checked against became the whole
-  parent section, so a quote that drifted from § 4.2.1 to § 4.2.5 would still verify — exactly the
-  rot that section targeting exists to catch. The objective is now the shortest selector that
-  *resolves to the passage's own section*, which also disambiguates repeated headings for free: a
-  bare title that lands on the first of two is rejected, and the ancestor path that reaches the
-  right one is used instead.
-- **`locate` says when a passage appears in more than one section.** A specification repeats
-  itself — "The response MUST include the following header fields:" sits under both § 10.2.7 and
-  § 10.3.5 of RFC 2616 — and `locate` can only pick one. Picking in silence was a quiet claim that
-  the passage lives there, and the citation would go on passing even after the passage was removed
-  from the section its author actually meant, because it survives in the other.
-- **An HTML page is now checked as a reader sees it, not as markup.** A fragment with no
-  `selector:`/`section:` was matched against the raw HTML, so a sentence lifted from a
-  `<meta name="description">` — or from inside a `<script>` — verified against a page whose prose
-  said something else entirely, while the prose a reader *had* seen did not match at all. Exactly
-  inverted: it passed text nobody was ever shown and failed text they were. Extraction with no
-  locator now yields the rendered text, with `<head>`, `<script>` and `<style>` left out of it.
-- **`add` no longer writes citations that `check` rejects.** `HtmlFormat.extract` rendered a
-  selected element with `get_text(strip=True)`, which joins stripped strings with nothing:
-  `<p>The <code>Origin</code> request header…</p>` came out as `TheOriginrequest header…`. But
-  `locate` — the function that *generates* the selectors `extract` consumes — read the same page
-  with a plain `get_text()`. So `apysource add` emitted a fragment that `apysource check` failed on
-  the very next run, for any sentence containing a link, `<code>` or `<em>`: most prose in a web
-  specification. Both now render through one function, and `locate` additionally *proves* the
-  selector it returns leads back to the snippet before returning it, so no future divergence can
-  reopen this. Whitespace is inserted only at block boundaries, where a browser also breaks the
-  line, and never between inline elements — `<b>Sub</b>string` stays `Substring`, because inventing
-  a space would manufacture a passing citation for prose the page never showed.
-- **`locate` on a large document was quadratic.** It re-normalized a growing prefix of the whole
-  file once per line: 11 seconds on a 422 KB RFC, which is exactly the kind of document this tool
-  exists to cite. It is now a single pass — 0.011 s, same answer.
-- A whole-document RFC citation no longer trips over pagination. `[Page 42]` footers and form feeds
-  were left in the text a snippet was matched against, so a sentence straddling a page break could
-  not be quoted at all; `sections` had always removed them, and whole-document extraction now
-  agrees.
-- **A snippet is now looked for in the whole source, not in the first 100,000 characters of it.**
-  RFC 9110 is 502,907 characters, so the check read a fifth of it: a real citation into its
-  status-code definitions was reported as `snippet not found in extracted content` — a flat claim
-  about a document the check had never read to the end of. Past that cap the check was not merely
-  wrong but *inert*, failing accurate and misquoted citations alike, so it distinguished nothing
-  in exactly the region a large specification keeps its detail. The cap bought nothing: the
-  substring test is linear, and diagnosing a miss across the whole of RFC 9110 takes a tenth of a
-  second. Every snippet test patched out `load_text`, which is the function that did the
-  truncating, so none of them could have seen it.
-- **A URL fragment no longer makes a second copy of the same document.** The cache was keyed on
-  the raw URL, so `rfc9110.html`, `rfc9110.html#section-7.2` and `rfc9110.html#section-8.1` were
-  three separate documents — three downloads, three polite delays, three cache entries, byte for
-  byte identical. A fragment is resolved by the client and never sent to a server; it names a
-  place *inside* a document, and cannot name a different one. Repos are now handed the document
-  too, so a repo whose pattern ends in a greedy `(.+)` — as `WiktionaryRepo`'s did — no longer
-  takes `#English` into its cache key and keeps Aphrodite a second time under
-  `aphrodite#english.txt`. Every repo is covered at the resolution seam, including one written by
-  someone else. Citations keep the fragment they were written with: it is what the report prints,
-  and it is the targeting the author already gave us.
-- Snippet verification now requires the **entire** quoted text to appear in the source.
-  Previously only the first 80 characters were compared, so a citation whose opening matched
-  but whose tail diverged would pass — the exact misquotation the tool exists to catch.
-- A trailing ellipsis (`...` or the Unicode `…`) now consistently marks an intentionally elided
-  quote and switches to prefix matching; the Unicode form was previously not recognized.
-- `part_of` now resolves to a parent source defined **later** in the same YAML file; forward
-  references were previously dropped silently.
-- RDF file classification (`shapes`/`inferred`) now matches the file name rather than the full
-  path, so a project directory containing those words no longer hides every `.ttl` file.
+## [0.5.0] - 2026-07-14
 
 ### Added
 - **A source can be named instead of addressed.** A new top-level `patterns` key maps a name
@@ -228,10 +139,6 @@ All notable changes to this project are documented here. The format is based on
   no recorded destination; that is reported as *unknown*, not passed over as clean, and
   `--refresh` resolves it. A URL that moved to a page which is now **gone** keeps its redirect
   chain, so the report can say the move led nowhere rather than only "could not fetch".
-- `--refresh` flag on `check`, `locate`, and `add` to bypass the HTTP cache and re-fetch sources.
-- `AUDIT.md` — a full-breadth audit of the codebase, tests, and documentation.
-- `CHANGELOG.md`, `CONTRIBUTING.md`, and `SECURITY.md`.
-- `ruff` linting/formatting, wired into `make lint`/`make format` and the `make check` gate.
 
 ### Changed
 - **An unknown top-level key in a sources file is now refused.** It was silently ignored. With
@@ -272,6 +179,109 @@ All notable changes to this project are documented here. The format is based on
   behind on failure: Wikisource created the page directory before knowing the page existed, and
   Gutenberg wrote an empty chapter index for a book it could not parse — caching the failure as a
   success, and leaving every citation into it failing forever as an "empty extraction".
+
+### Fixed
+- **`apysource add <name>` fetched the wrong document when an entry pinned that name to its own URL.**
+  It minted the URL from the pattern and ignored the entry, so a file pinning `RFC 9110` to
+  datatracker had its snippet located in rfc-editor's *plain text* and the resulting locator written
+  into the *HTML* entry — a targetter `check` would then apply to a document it was never measured
+  from. `add` now resolves through `complete()`, the same entry-wins rule `check` uses.
+- **`apysource add` no longer overwrites a file it cannot read.** A sources file that existed but had
+  no top-level `sources:` (a typo'd `source:`, say) was treated as empty and then replaced, costing
+  the author everything else in it. It is refused instead.
+- **A pattern template with an unbalanced or an escaped brace was mis-validated.** The load-time check
+  scanned with a regex instead of `string.Formatter`, so `https://e.org/{n}/{` passed it and then
+  raised out of `str.format` at mint time — the very deferred failure the check exists to prevent —
+  while a correctly escaped `{{lit}}` was falsely refused.
+- **An optional capture group that did not match interpolated the word `"None"` into the URL.**
+  `^RFC (?P<n>\d+)(?P<sfx>bis)?$` minted `.../rfc9110None.txt` and fetched it. A group that did not
+  participate is the empty string now.
+- **`Archive <item>` accepted a name with a slash in it and then fetched a different item.** The
+  family allowed `.+` while `url_pattern` stops the key at the first `/`, so `Archive foo/bar` was
+  claimed, keyed as `foo`, and verified against the wrong document with nothing to say so.
+- **`SourceSet.entries` no longer aliases the data it was given.** `complete()` returned the caller's
+  own dict when the entry already had a URL and a fresh one when it minted — two ownership rules for
+  one return type, so a consumer editing a resolved entry silently edited the document it had read.
+- **A section selector now names the section the passage is actually in.** `locate` looked for
+  *the shortest selector that extracts text containing the snippet* — and that objective quietly
+  guarantees the wrong answer, because a section always contains its subsections' text and always
+  has the shorter label. A passage living in § 4.2.1 was cited as § 4.2. On RFC 9110 that happened
+  to **157 of 271** paragraphs; every one of them round-tripped, which is why nothing caught it.
+  It is not a cosmetic imprecision: the scope the citation is checked against became the whole
+  parent section, so a quote that drifted from § 4.2.1 to § 4.2.5 would still verify — exactly the
+  rot that section targeting exists to catch. The objective is now the shortest selector that
+  *resolves to the passage's own section*, which also disambiguates repeated headings for free: a
+  bare title that lands on the first of two is rejected, and the ancestor path that reaches the
+  right one is used instead.
+- **`locate` says when a passage appears in more than one section.** A specification repeats
+  itself — "The response MUST include the following header fields:" sits under both § 10.2.7 and
+  § 10.3.5 of RFC 2616 — and `locate` can only pick one. Picking in silence was a quiet claim that
+  the passage lives there, and the citation would go on passing even after the passage was removed
+  from the section its author actually meant, because it survives in the other.
+- **An HTML page is now checked as a reader sees it, not as markup.** A fragment with no
+  `selector:`/`section:` was matched against the raw HTML, so a sentence lifted from a
+  `<meta name="description">` — or from inside a `<script>` — verified against a page whose prose
+  said something else entirely, while the prose a reader *had* seen did not match at all. Exactly
+  inverted: it passed text nobody was ever shown and failed text they were. Extraction with no
+  locator now yields the rendered text, with `<head>`, `<script>` and `<style>` left out of it.
+- **`add` no longer writes citations that `check` rejects.** `HtmlFormat.extract` rendered a
+  selected element with `get_text(strip=True)`, which joins stripped strings with nothing:
+  `<p>The <code>Origin</code> request header…</p>` came out as `TheOriginrequest header…`. But
+  `locate` — the function that *generates* the selectors `extract` consumes — read the same page
+  with a plain `get_text()`. So `apysource add` emitted a fragment that `apysource check` failed on
+  the very next run, for any sentence containing a link, `<code>` or `<em>`: most prose in a web
+  specification. Both now render through one function, and `locate` additionally *proves* the
+  selector it returns leads back to the snippet before returning it, so no future divergence can
+  reopen this. Whitespace is inserted only at block boundaries, where a browser also breaks the
+  line, and never between inline elements — `<b>Sub</b>string` stays `Substring`, because inventing
+  a space would manufacture a passing citation for prose the page never showed.
+- **`locate` on a large document was quadratic.** It re-normalized a growing prefix of the whole
+  file once per line: 11 seconds on a 422 KB RFC, which is exactly the kind of document this tool
+  exists to cite. It is now a single pass — 0.011 s, same answer.
+- A whole-document RFC citation no longer trips over pagination. `[Page 42]` footers and form feeds
+  were left in the text a snippet was matched against, so a sentence straddling a page break could
+  not be quoted at all; `sections` had always removed them, and whole-document extraction now
+  agrees.
+- **A snippet is now looked for in the whole source, not in the first 100,000 characters of it.**
+  RFC 9110 is 502,907 characters, so the check read a fifth of it: a real citation into its
+  status-code definitions was reported as `snippet not found in extracted content` — a flat claim
+  about a document the check had never read to the end of. Past that cap the check was not merely
+  wrong but *inert*, failing accurate and misquoted citations alike, so it distinguished nothing
+  in exactly the region a large specification keeps its detail. The cap bought nothing: the
+  substring test is linear, and diagnosing a miss across the whole of RFC 9110 takes a tenth of a
+  second. Every snippet test patched out `load_text`, which is the function that did the
+  truncating, so none of them could have seen it.
+- **A URL fragment no longer makes a second copy of the same document.** The cache was keyed on
+  the raw URL, so `rfc9110.html`, `rfc9110.html#section-7.2` and `rfc9110.html#section-8.1` were
+  three separate documents — three downloads, three polite delays, three cache entries, byte for
+  byte identical. A fragment is resolved by the client and never sent to a server; it names a
+  place *inside* a document, and cannot name a different one. Repos are now handed the document
+  too, so a repo whose pattern ends in a greedy `(.+)` — as `WiktionaryRepo`'s did — no longer
+  takes `#English` into its cache key and keeps Aphrodite a second time under
+  `aphrodite#english.txt`. Every repo is covered at the resolution seam, including one written by
+  someone else. Citations keep the fragment they were written with: it is what the report prints,
+  and it is the targeting the author already gave us.
+
+## [0.4.0] - 2026-07-14
+
+### Fixed
+- Snippet verification now requires the **entire** quoted text to appear in the source.
+  Previously only the first 80 characters were compared, so a citation whose opening matched
+  but whose tail diverged would pass — the exact misquotation the tool exists to catch.
+- A trailing ellipsis (`...` or the Unicode `…`) now consistently marks an intentionally elided
+  quote and switches to prefix matching; the Unicode form was previously not recognized.
+- `part_of` now resolves to a parent source defined **later** in the same YAML file; forward
+  references were previously dropped silently.
+- RDF file classification (`shapes`/`inferred`) now matches the file name rather than the full
+  path, so a project directory containing those words no longer hides every `.ttl` file.
+
+### Added
+- `--refresh` flag on `check`, `locate`, and `add` to bypass the HTTP cache and re-fetch sources.
+- `AUDIT.md` — a full-breadth audit of the codebase, tests, and documentation.
+- `CHANGELOG.md`, `CONTRIBUTING.md`, and `SECURITY.md`.
+- `ruff` linting/formatting, wired into `make lint`/`make format` and the `make check` gate.
+
+### Changed
 - The crawler `User-Agent` is now derived from the package version (`apysource/<version>`) so it
   tracks releases automatically, instead of the stale hard-coded `apysource/1.0`.
 - The package version now lives in `apysource.__version__` and is read dynamically by the build,
@@ -284,5 +294,7 @@ All notable changes to this project are documented here. The format is based on
 - Baseline release captured at the time this changelog was introduced. Earlier history was not
   recorded in release notes; see the git log for prior commits.
 
-[Unreleased]: https://github.com/alganet/apysource/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/alganet/apysource/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/alganet/apysource/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/alganet/apysource/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/alganet/apysource/releases/tag/v0.3.1

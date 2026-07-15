@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+#
+# SPDX-License-Identifier: ISC
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: release
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # The tag is what a reader trusts to find the code a release was cut
+      # from, and nothing was checking it agreed with the version being
+      # uploaded. Upload is irreversible: PyPI refuses to replace a file, so
+      # a tag that disagrees is only discovered once it cannot be fixed.
+      - name: Tag must match the packaged version
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          # Read __version__ the way the build does (setuptools' attr reads it
+          # by parsing, not importing), so this runs before dependencies are
+          # installed: importing the package would pull in the whole API and
+          # its third-party deps just to read a string literal.
+          packaged="$(python - <<'PY'
+          import ast, pathlib
+          src = pathlib.Path("apysource/__init__.py").read_text()
+          for node in ast.parse(src).body:
+              if isinstance(node, ast.Assign) and any(
+                  getattr(t, "id", None) == "__version__" for t in node.targets
+              ):
+                  print(node.value.value)
+                  break
+          PY
+          )"
+          if [ "$tagged" != "$packaged" ]; then
+            echo "tag $GITHUB_REF_NAME declares $tagged, but apysource.__version__ is $packaged" >&2
+            exit 1
+          fi
+          echo "releasing $packaged"
+
+      # A tag push does not run the Tests workflow, so without this a release
+      # is the one path to PyPI that no test ever gated.
+      - run: pip install -e .[dev]
+      - run: make check
+
+      - run: pip install build twine
+      - run: make publish
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
