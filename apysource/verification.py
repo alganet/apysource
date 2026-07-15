@@ -389,9 +389,17 @@ def _run_chain_checks(
                 _failure(result, frag, "cache not resolved for verification"))
             continue
 
+        # The whole document, not a prefix of it. This read the first 100,000
+        # characters, which is a fifth of RFC 9110 — so a real citation into
+        # its status-code definitions was reported as "snippet not found in
+        # extracted content", a flat claim about a source the check had never
+        # looked at. Nothing was bought by the cap: the substring test is
+        # linear, and diagnosing a miss across the whole of RFC 9110 takes a
+        # tenth of a second.
+        #
         # No force here: the extraction phase above already refreshed and
         # re-crawled, so this reads the warm cache.
-        loaded = load_text(result, max_chars=100000, crawl=crawl)
+        loaded = load_text(result, max_chars=None, crawl=crawl)
         if loaded.status != "ok":
             # The source never arrived. Running the snippet against the empty
             # string would report "snippet not found" — blaming the quote for

@@ -65,9 +65,13 @@ def normalize_mime_type(value: str) -> str:
 TRUNCATION_MARKER = re.compile(r"\n?\.\.\. \[\d+ more chars\]\s*$")
 
 
-def truncate(text: str, max_chars: int) -> str:
-    """Cut text to length, saying how much was left behind."""
-    if len(text) <= max_chars:
+def truncate(text: str, max_chars: int | None) -> str:
+    """Cut text to length, saying how much was left behind.
+
+    ``None`` means the whole document, and is what verification asks for: a
+    snippet must be looked for in all of the source, not in a prefix of it.
+    """
+    if max_chars is None or len(text) <= max_chars:
         return text
     return text[:max_chars] + f"\n... [{len(text) - max_chars} more chars]"
 

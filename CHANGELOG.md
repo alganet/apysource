@@ -13,6 +13,25 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **A snippet is now looked for in the whole source, not in the first 100,000 characters of it.**
+  RFC 9110 is 502,907 characters, so the check read a fifth of it: a real citation into its
+  status-code definitions was reported as `snippet not found in extracted content` — a flat claim
+  about a document the check had never read to the end of. Past that cap the check was not merely
+  wrong but *inert*, failing accurate and misquoted citations alike, so it distinguished nothing
+  in exactly the region a large specification keeps its detail. The cap bought nothing: the
+  substring test is linear, and diagnosing a miss across the whole of RFC 9110 takes a tenth of a
+  second. Every snippet test patched out `load_text`, which is the function that did the
+  truncating, so none of them could have seen it.
+- **A URL fragment no longer makes a second copy of the same document.** The cache was keyed on
+  the raw URL, so `rfc9110.html`, `rfc9110.html#section-7.2` and `rfc9110.html#section-8.1` were
+  three separate documents — three downloads, three polite delays, three cache entries, byte for
+  byte identical. A fragment is resolved by the client and never sent to a server; it names a
+  place *inside* a document, and cannot name a different one. Repos are now handed the document
+  too, so a repo whose pattern ends in a greedy `(.+)` — as `WiktionaryRepo`'s did — no longer
+  takes `#English` into its cache key and keeps Aphrodite a second time under
+  `aphrodite#english.txt`. Every repo is covered at the resolution seam, including one written by
+  someone else. Citations keep the fragment they were written with: it is what the report prints,
+  and it is the targeting the author already gave us.
 - Snippet verification now requires the **entire** quoted text to appear in the source.
   Previously only the first 80 characters were compared, so a citation whose opening matched
   but whose tail diverged would pass — the exact misquotation the tool exists to catch.
