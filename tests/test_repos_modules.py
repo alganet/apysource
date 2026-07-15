@@ -386,7 +386,10 @@ def test_wikisource_process_page_uses_cache(tmp_path):
 def _wiktionary(tmp_path, fetcher=None):
     return WiktionaryRepo(
         cache_dir=tmp_path, http_client=fetcher,
-        url_pattern=r"wiktionary\.org/wiki/(.+)",
+        # The pattern this repo actually ships with (defaults.toml). It read
+        # `(.+)` here for as long as it read `(.+)` there, so the greedy tail
+        # below was never once exercised by a test.
+        url_pattern=r"wiktionary\.org/wiki/(.+?)(?:\?|#|$)",
         base_url="https://en.wiktionary.org",
     )
 
@@ -394,6 +397,16 @@ def _wiktionary(tmp_path, fetcher=None):
 def test_wiktionary_url_to_key(tmp_path):
     repo = _wiktionary(tmp_path)
     assert repo.url_to_key("https://en.wiktionary.org/wiki/deva") == "deva"
+
+
+def test_wiktionary_url_to_key_stops_at_the_anchor(tmp_path):
+    """A language anchor is the natural way to cite Wiktionary — and a greedy
+    pattern swallowed it into the key, so `Aphrodite#English` was a second,
+    duplicate copy of Aphrodite living in a file called `aphrodite#english.txt`.
+    """
+    repo = _wiktionary(tmp_path)
+    assert repo.url_to_key(
+        "https://en.wiktionary.org/wiki/Aphrodite#English") == "Aphrodite"
 
 
 def test_wiktionary_resolve_location(tmp_path):

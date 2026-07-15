@@ -110,7 +110,7 @@ class Compiled:
         return 'https://en.wikisource.org'
 
     def wiktionary_url_pattern(self):
-        return 'wiktionary\\.org/wiki/(.+)'
+        return 'wiktionary\\.org/wiki/(.+?)(?:\\?|#|$)'
 
     def wiktionary_base_url(self):
         return 'https://en.wiktionary.org'

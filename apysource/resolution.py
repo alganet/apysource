@@ -24,7 +24,7 @@ from rdflib import Graph, URIRef
 from rdflib.namespace import DCTERMS, RDF, RDFS
 
 from apysource.formats import extract_content, truncate
-from apysource.http import CachedFetcher
+from apysource.http import CachedFetcher, document_url
 from apysource.namespaces import OA, SCHEMA, SV
 from apysource.repos import RepoRegistry
 from apysource.repos._base import BaseRepo
@@ -77,7 +77,16 @@ def _resolve_repo(registry: RepoRegistry, url: str, location: str,
     fetch it. When it matched the URL but can do neither, ``fallback_reason``
     says why, so the caller can fall back to the fetcher *out loud* rather
     than silently checking a different document.
+
+    The repo is asked about the *document*, never about the anchor: a key is
+    the identity of a document in a repo, and an anchor names a place inside
+    one. A repo whose pattern ends in a greedy ``(.+)`` would otherwise swallow
+    ``#English`` into its cache key and keep a second copy of the same page
+    under it — and every repo, including one written by someone else, is
+    protected here rather than one pattern at a time.
     """
+    url = document_url(url)
+
     repo = registry.get_repo(url)
     if repo is None:
         return None, "", None, ""
@@ -200,7 +209,7 @@ def resolve_direct(g: Graph, entity_uri: URIRef, registry: RepoRegistry,
     return ResolveResult(status="no_module", label=label, url=url)
 
 
-def _load_repo_text(result: RepoResult, max_chars: int, *,
+def _load_repo_text(result: RepoResult, max_chars: int | None, *,
                     force: bool, crawl: bool) -> TextOutcome:
     """Read a repo-backed document, crawling it first if it is not here yet.
 
@@ -259,9 +268,13 @@ def _load_repo_text(result: RepoResult, max_chars: int, *,
     return TextOutcome(truncate(text, max_chars))
 
 
-def load_text(result: ResolveResult, max_chars: int = 5000, *,
+def load_text(result: ResolveResult, max_chars: int | None = 5000, *,
               force: bool = False, crawl: bool = True) -> TextOutcome:
     """Extract source text, and say why there is none when there is none.
+
+    ``max_chars=None`` returns the whole document. Verification asks for that:
+    a citation is either in the source or it is not, and a cap turns "I only
+    read the first 100,000 characters" into "your snippet is not there".
 
     ``force`` re-fetches a fetcher-backed source and re-crawls a repo-backed
     one. ``crawl=False`` refuses to fetch a repo document that is not cached,
@@ -292,7 +305,7 @@ def load_text(result: ResolveResult, max_chars: int = 5000, *,
     return TextOutcome("", "no_file", "")
 
 
-def get_text(result: ResolveResult, max_chars: int = 5000,
+def get_text(result: ResolveResult, max_chars: int | None = 5000,
              *, force: bool = False) -> str:
     """Extract content text using the repo or fetcher from the resolve result.
 

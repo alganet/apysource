@@ -29,7 +29,7 @@ gutenberg_base_url = "https://www.gutenberg.org"
 wikisource_url_pattern = "wikisource\\.org/wiki/(.+?)(?:\\?|#|$)"
 wikisource_base_url = "https://en.wikisource.org"
 
-wiktionary_url_pattern = "wiktionary\\.org/wiki/(.+)"
+wiktionary_url_pattern = "wiktionary\\.org/wiki/(.+?)(?:\\?|#|$)"
 wiktionary_base_url = "https://en.wiktionary.org"
 
 # Only en-US: translations live in mdn/translated-content, and mapping a

@@ -18,6 +18,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from urllib.parse import urldefrag
 
 import requests
 
@@ -30,11 +31,28 @@ logger = logging.getLogger(__name__)
 DEFAULT_USER_AGENT = f"apysource/{__version__} (source verification; gentle crawler)"
 
 
+def document_url(url: str) -> str:
+    """The document a URL names, without the fragment that points inside it.
+
+    A fragment identifies a place *within* a document, never a different
+    document — it is resolved by the client and is never sent to the server.
+    So two citations into ``rfc9110.html`` that name different sections are
+    two citations into one document, and must share one cache entry, one
+    download and one polite delay. Keyed on the raw URL they were three
+    documents, fetched three times, byte for byte identical.
+
+    The citation keeps its fragment: the report still prints the URL its
+    author wrote. Only the identity of *the thing being fetched* drops it.
+    """
+    return urldefrag(url)[0]
+
+
 class CachedFetcher:
     """HTTP client that caches response bodies on disk.
 
-    Cache key is sha256(url)[:16]. Cache hits skip the network
-    and the polite delay entirely.
+    Cache key is sha256 of the *document* URL (see ``document_url``), so the
+    same document cited at a dozen different anchors is fetched once. Cache
+    hits skip the network and the polite delay entirely.
     """
 
     def __init__(self, cache_dir: Path, user_agent: str = DEFAULT_USER_AGENT,
@@ -48,7 +66,7 @@ class CachedFetcher:
 
     @staticmethod
     def _cache_key(url: str) -> str:
-        return hashlib.sha256(url.encode()).hexdigest()[:16]
+        return hashlib.sha256(document_url(url).encode()).hexdigest()[:16]
 
     def _cache_path(self, url: str) -> Path:
         return self.cache_dir / self._cache_key(url)
@@ -63,6 +81,7 @@ class CachedFetcher:
         that the URL is clean — callers must not report it as such. A
         ``--refresh`` re-fetch is what turns an unknown into a known.
         """
+        url = document_url(url)
         if url in self._redirects:
             return self._redirects[url]
 
@@ -101,7 +120,7 @@ class CachedFetcher:
         alike, and a repo that reads both as "this document does not exist"
         would blame a citation for an unplugged cable.
         """
-        return self._statuses.get(url)
+        return self._statuses.get(document_url(url))
 
     def _record_redirect(self, url: str, resp: requests.Response) -> None:
         """Persist where a fetch landed, alongside its cached body.
@@ -158,6 +177,10 @@ class CachedFetcher:
         cached bytes only (no network, ``None`` on a miss). On a network error
         the response is logged and ``None`` is returned without caching.
         """
+        # Everything below — the cache path, the memos, the request itself —
+        # is about one document, so it is keyed on the document and not on
+        # whichever anchor the citation happened to name.
+        url = document_url(url)
         path = self._cache_path(url)
 
         if force:

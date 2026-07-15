@@ -361,3 +361,57 @@ class TestStatus:
                    return_value=_FakeResponse(b"it returned")):
             assert f.get(url, force=True) == "it returned"
         assert f.status_for(url) == 200
+
+
+class TestFragmentsAreNotDocuments:
+    """An anchor names a place inside a document, not a different document.
+
+    lint-http cites ~350 passages that live in a handful of RFCs, and every
+    one of them carries a ``#section-7.2``-style anchor. Keyed on the raw URL
+    that was 350 downloads of a handful of documents — each with a polite
+    delay, each byte for byte identical to the last.
+    """
+
+    URL = "https://www.rfc-editor.org/rfc/rfc9110.html"
+
+    def test_the_cache_key_ignores_the_anchor(self, tmp_path):
+        f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+        assert f._cache_key(self.URL) == f._cache_key(f"{self.URL}#section-7.2")
+        assert f._cache_key(f"{self.URL}#section-7.2") == \
+            f._cache_key(f"{self.URL}#section-8.1")
+
+    def test_a_second_anchor_is_served_from_cache(self, tmp_path):
+        """The point of the whole thing: the network is touched once."""
+        f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+
+        with patch("apysource.http.requests.get",
+                   return_value=_FakeResponse(b"the whole RFC")) as get:
+            assert f.get(f"{self.URL}#section-7.2") == "the whole RFC"
+            assert f.get(f"{self.URL}#section-8.1") == "the whole RFC"
+            assert f.get(self.URL) == "the whole RFC"
+
+        assert get.call_count == 1
+
+    def test_the_anchor_is_not_sent_to_the_server(self, tmp_path):
+        """It never was — the server cannot see a fragment. Now we don't pretend."""
+        f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+
+        with patch("apysource.http.requests.get",
+                   return_value=_FakeResponse(b"body")) as get:
+            f.get(f"{self.URL}#section-7.2")
+
+        assert get.call_args.args[0] == self.URL
+
+    def test_what_a_url_led_to_is_known_whichever_anchor_asks(self, tmp_path):
+        """Otherwise one anchor reports a 301 and the next reports 'unknown'."""
+        f = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+        moved = _FakeResponse(b"body", url="https://example.com/new",
+                              history=[_FakeRedirect(301, self.URL)])
+
+        with patch("apysource.http.requests.get", return_value=moved):
+            f.get(f"{self.URL}#section-7.2")
+
+        info = f.redirect_for(f"{self.URL}#section-8.1")
+        assert info is not None, "a second anchor must not report 'destination unknown'"
+        assert info.redirected
+        assert info.final_url == "https://example.com/new"

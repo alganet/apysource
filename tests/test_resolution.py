@@ -590,3 +590,53 @@ def test_a_section_selector_on_a_plain_document_says_so():
     outcome = load_text(result)
     assert outcome.status == "no_section"
     assert "no section structure" in outcome.reason
+
+
+# ── An anchor is not a document (stray-bug tranche) ──────────────────
+
+def test_a_repo_is_asked_about_the_document_not_the_anchor(tmp_path):
+    """Every repo is protected here, not one url_pattern at a time.
+
+    A repo whose pattern ends in a greedy `(.+)` — which a third-party repo
+    is perfectly free to do — would take `#English` into its cache key and
+    keep a second copy of the same page under it. Resolution hands repos the
+    document, so a greedy pattern has nothing to be greedy about.
+    """
+    seen = []
+
+    class GreedyRepo(BaseRepo):
+        NAME = "greedy"
+
+        def url_to_key(self, url):
+            seen.append(url)
+            m = self.url_pattern.search(url)
+            return m.group(1) if m else None
+
+        def resolve_location(self, loc, key):
+            p = self.cache_root / f"{key}.txt"
+            return p if p.exists() else None
+
+    repo = GreedyRepo(cache_dir=tmp_path, url_pattern=r"example\.com/wiki/(.+)",
+                      base_url="https://example.com")
+    (tmp_path / "Aphrodite.txt").write_text("the passage")
+
+    g, frag = _chain("https://example.com/wiki/Aphrodite#English")
+    result = resolve_chain(g, frag, RepoRegistry([repo]), fetcher=MockFetcher())
+
+    assert seen == ["https://example.com/wiki/Aphrodite"]
+    assert isinstance(result, RepoResult)
+    assert result.key == "Aphrodite"
+    assert result.cache_file is not None, "the anchor must not hide the cached page"
+
+
+def test_the_citation_keeps_the_anchor_the_author_wrote(tmp_path):
+    """The document is what we fetch; the URL is what we report. Not the same thing.
+
+    Stripping the anchor from the result would make the report name a URL the
+    author never wrote — and would throw away the one piece of targeting they
+    already gave us (C3).
+    """
+    url = "https://www.rfc-editor.org/rfc/rfc9110.html#section-7.2"
+    g, frag = _chain(url)
+    result = resolve_chain(g, frag, EMPTY_REGISTRY, fetcher=MockFetcher())
+    assert result.url == url
