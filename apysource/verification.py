@@ -266,7 +266,7 @@ def run_checks(
 
                 outcome = load_text(result, max_chars=None, force=force,
                                     crawl=crawl)
-                clean = strip_headers(outcome.text) if outcome.text else ""
+                clean = normalize_ws(outcome.text) if outcome.text else ""
 
                 # A Term need not quote anything — the shapes ask only for a URL
                 # and a label, and "this term is backed by a source that exists"
@@ -367,7 +367,14 @@ def _run_chain_checks(
         # only; the snippet phase below reads the now-fresh caches, so each
         # source is fetched at most once per run.
         outcome = load_text(result, max_chars=50000, force=force, crawl=crawl)
-        clean = strip_headers(outcome.text)
+        # The same text the snippet check will match against. This ran through
+        # `strip_headers`, which drops every line beginning with `#` — every ATX
+        # heading in every Markdown document — so this check called a document
+        # empty while the snippet check found the quote inside it. Two checks
+        # contradicting each other about one document, and the PROV graph
+        # siding with the wrong one: the fragment the report FAILED was written
+        # out as `verificationStatus "verified"`.
+        clean = normalize_ws(outcome.text)
 
         if len(clean) < MIN_EXTRACT_CHARS:
             loc = str(g.value(frag, SV.sourceLocation) or "")
@@ -414,24 +421,30 @@ def _run_chain_checks(
             ))
             continue
 
-        if len(snippet) < MIN_EXTRACT_CHARS:
-            # A handful of characters is not evidence: "MUST" appears in every
-            # specification ever written, and matching it proves nothing about
-            # the passage the citation claims to quote.
-            snippet_fail.append(_failure(
-                result, frag,
-                f"snippet is too short to be evidence ({len(snippet)} chars; "
-                f"at least {MIN_EXTRACT_CHARS} are needed)",
-            ))
-            continue
-
-        norm_snippet = normalize_ws(snippet)
         # A trailing ellipsis ("..." or "…") marks a deliberately elided quote:
         # the author kept only the opening of a longer passage, so matching the
         # retained prefix is correct. Stripping it leaves the text that must
         # appear verbatim. Without an ellipsis, the *entire* snippet must appear
         # in the source — otherwise drift in the tail would go undetected.
+        norm_snippet = normalize_ws(snippet)
         norm_snippet = re.sub(r"(\.\.\.|…)$", "", norm_snippet).strip()
+
+        # Measured on the text that is actually matched, and not on the text as
+        # written. The gate used to read the raw snippet, while the match read
+        # this one — so `"MUST                ..."` is twenty-three characters
+        # to the gate and four to the matcher, and a four-character quote
+        # verified green, with `verificationStatus "verified"` to show for it.
+        if len(norm_snippet) < MIN_EXTRACT_CHARS:
+            # A handful of characters is not evidence: "MUST" appears in every
+            # specification ever written, and matching it proves nothing about
+            # the passage the citation claims to quote.
+            snippet_fail.append(_failure(
+                result, frag,
+                f"snippet is too short to be evidence "
+                f"({len(norm_snippet)} chars once whitespace is collapsed and "
+                f"any ellipsis dropped; at least {MIN_EXTRACT_CHARS} are needed)",
+            ))
+            continue
 
         if result.status != "resolved":
             snippet_fail.append(
@@ -588,6 +601,11 @@ def print_report(checks: list[CheckResult], summary: bool = False,
         print("  EXIT CODE: 1 (a verifier that verifies nothing has not passed)")
     elif fail_count > 0:
         print("  EXIT CODE: 1 (failures present)")
+    elif warn_count > 0:
+        # It said "all checks passed" over a run showing a WARN. The exit code
+        # was right — warnings are non-fatal by design — and the sentence was
+        # not.
+        print("  EXIT CODE: 0 (no failures; warnings above are not fatal)")
     else:
         print("  EXIT CODE: 0 (all checks passed)")
     print(f"  {'=' * 70}")

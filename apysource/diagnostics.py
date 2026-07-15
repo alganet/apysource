@@ -20,6 +20,7 @@ the source that is not true.** A hint that sends the author hunting for a
 word already in front of them is worse than no hint at all.
 """
 
+from collections import Counter
 import re
 import string
 from dataclasses import dataclass, field
@@ -257,7 +258,30 @@ def _word_delta(snippet: list[str],
             missing.extend(snippet[i1:i2])
         if tag in ("replace", "insert"):
             extra.extend(window[j1:j2])
-    return missing, extra
+
+    # A word that turns up in *both* lists has not gone missing and has not been
+    # added: it has moved. Reporting it twice made the diagnosis contradict
+    # itself in adjacent lines —
+    #
+    #     the passage does not have: entity-header
+    #     the passage also has:      entity-header
+    #
+    # — with the word plainly visible in the passage printed above them. Cancel
+    # the pairs off; what survives is the real disagreement.
+    shared = Counter(_keys(missing)) & Counter(_keys(extra))
+    return _drop(missing, Counter(shared)), _drop(extra, Counter(shared))
+
+
+def _drop(words: list[str], budget: Counter) -> list[str]:
+    """Remove up to ``budget`` occurrences of each word, by folded form."""
+    kept = []
+    for word in words:
+        key = _fold_all(word)
+        if budget[key]:
+            budget[key] -= 1
+            continue
+        kept.append(word)
+    return kept
 
 
 def _elide(text: str) -> str:
@@ -284,12 +308,19 @@ def render(diagnosis: Diagnosis) -> list[str]:
 
     lines = [f"closest match ({diagnosis.percent}% similar{location})",
              f"  source says: {_elide(diagnosis.source_text)}"]
+
+    # "not in the source" was a claim the diagnosis had no right to make. The
+    # diff is against the *closest passage*, not against the document, and a word
+    # missing from that passage is very often present elsewhere: `cacheable`
+    # occurs 33 times in RFC 2616, and the report said it was not in the source
+    # — sending the author hunting for a word already in front of them, which is
+    # the exact failure this module was written to end.
     if diagnosis.missing:
         lines.append(
-            f"  not in the source: {_elide(' '.join(diagnosis.missing))}")
+            f"  not in that passage: {_elide(' '.join(diagnosis.missing))}")
     if diagnosis.extra:
         lines.append(
-            f"  the source also has: {_elide(' '.join(diagnosis.extra))}")
+            f"  that passage also has: {_elide(' '.join(diagnosis.extra))}")
     return lines
 
 

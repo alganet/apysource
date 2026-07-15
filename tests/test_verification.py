@@ -499,7 +499,7 @@ def test_report_prints_the_hint_under_its_failure(capsys):
 
     assert "snippet not found in extracted content" in out
     assert "closest match (81% similar)" in out
-    assert "the source also has: (Section 7.2)" in out
+    assert "that passage also has: (Section 7.2)" in out
 
 
 # ── Repo documents (B4/B5) ───────────────────────────────────────────────

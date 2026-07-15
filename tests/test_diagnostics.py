@@ -139,7 +139,7 @@ class TestRendering:
     def test_produces_a_readable_block(self):
         lines = explain_snippet_failure(MISQUOTE, RFC_9112)
         assert lines[0].startswith("closest match (")
-        assert any("the source also has:" in ln for ln in lines)
+        assert any("that passage also has:" in ln for ln in lines)
 
     def test_names_the_region_searched(self):
         lines = explain_snippet_failure(MISQUOTE, RFC_9112, where="§ 3.2")
@@ -150,7 +150,7 @@ class TestRendering:
         joined = "\n".join(lines)
         assert "differs only in case" in joined
         assert RFC_9112 in joined
-        assert "not in the source" not in joined
+        assert "not in that passage" not in joined
 
     def test_silent_when_nothing_is_close(self):
         assert explain_snippet_failure("totally unrelated wording", RFC_9112) == []
