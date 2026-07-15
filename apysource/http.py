@@ -47,6 +47,16 @@ def document_url(url: str) -> str:
     return urldefrag(url)[0]
 
 
+def url_anchor(url: str) -> str:
+    """The fragment a citation's URL carries, or "".
+
+    It is the one piece of targeting the author has already written down —
+    `rfc9110.html#section-7.2` says, in the author's own hand, *where in the
+    document this is*. It was read by nobody.
+    """
+    return urldefrag(url)[1]
+
+
 class CachedFetcher:
     """HTTP client that caches response bodies on disk.
 

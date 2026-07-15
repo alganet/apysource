@@ -28,6 +28,7 @@ from apysource.sections import (
     match_section,
     parse_selector,
     roman_to_int,
+    selector_for_anchor,
 )
 
 
@@ -1067,3 +1068,59 @@ def test_a_lowercase_heading_round_trips_through_add_and_check():
 
     got = extract_section(doc, result.locator, md, strict=True)
     assert snippet in got, f"check resolved {result.locator!r} to: {got!r}"
+
+
+# ── The anchor the author already wrote (C3) ────────────────────────────
+
+def test_an_rfc_style_anchor_becomes_a_section_selector():
+    """`#section-7.2` is the one piece of targeting every citation already has."""
+    doc = "# 7. Fields\nField text.\n\n## 7.2 Host\nHost text.\n"
+    md = MarkdownFormat()
+    assert selector_for_anchor(doc, "section-7.2", md) == "§ 7.2"
+    assert selector_for_anchor(doc, "section-7", md) == "§ 7"
+
+
+def test_an_anchor_naming_a_heading_resolves_to_that_heading():
+    """WHATWG's `#origin-header` sits on `<h3>3.2. \\`Origin\\` header</h3>`."""
+    page = ('<html><body><h2 id="http-extensions">3. HTTP extensions</h2>'
+            '<h3 id="origin-header">3.2. Origin header</h3>'
+            '<p>The Origin header indicates where a fetch originates from.</p>'
+            '</body></html>')
+    html = HtmlFormat()
+    assert selector_for_anchor(page, "origin-header", html) == "§ 3.2"
+    assert selector_for_anchor(page, "http-extensions", html) == "§ 3"
+
+
+def test_an_anchor_on_something_that_is_not_a_heading_does_not_narrow():
+    """The trap C3 had to survive.
+
+    In the Fetch spec `#cors-safelisted-request-header` is on an inline `<dfn>`.
+    Turning it into a CSS selector would narrow the scope to a two-word term and
+    fail every honest citation of the sentence around it. An anchor says where
+    the author was *looking*, not always what they meant to quote — and where we
+    cannot tell, we must not narrow. Our guess must not be able to condemn a
+    citation.
+    """
+    page = ('<html><body><h2 id="terms">1. Terms</h2>'
+            '<p>A <dfn id="cors-safelisted-request-header">CORS-safelisted '
+            'request-header</dfn> is a header whose name is safe to send.</p>'
+            '</body></html>')
+    html = HtmlFormat()
+    assert selector_for_anchor(page, "cors-safelisted-request-header", html) is None
+    assert selector_for_anchor(page, "no-such-anchor", html) is None
+    assert selector_for_anchor(page, "page-42", html) is None
+
+
+def test_a_heading_anchor_matches_by_slug_where_there_are_no_ids():
+    """Markdown and wikitext have no id attributes; renderers slugify the title."""
+    doc = "# Origin header\nIntro.\n\n## Browser compatibility\nTable.\n"
+    md = MarkdownFormat()
+    assert selector_for_anchor(doc, "browser-compatibility", md) == "Browser compatibility"
+
+
+def test_a_selector_is_never_emitted_that_would_parse_as_something_else():
+    """A title with a comma must be quoted, or it parses as two selector parts."""
+    from apysource.sections import selector_for_title
+    assert selector_for_title("Lost, forever") == "'Lost, forever'"
+    assert selector_for_title("7.2 Host") == "§ 7.2"
+    assert selector_for_title("Introduction") == "Introduction"

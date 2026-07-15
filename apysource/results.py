@@ -26,6 +26,11 @@ class ResolveResult:
     url: str = ""
     source: str = ""
 
+    #: The fragment the citation's URL carries — `#section-7.2`. Targeting the
+    #: author already wrote down, and which nothing used to read. It narrows the
+    #: scope only when no explicit `section:`/`selector:` says otherwise.
+    anchor: str = ""
+
 
 @dataclass
 class RepoResult(ResolveResult):

@@ -568,6 +568,87 @@ def simplify_selector(root: SectionNode, selector: str, snippet: str) -> str:
     return selector
 
 
+#: `#section-7.2` — the rfc-editor convention, and unambiguous wherever it appears.
+_ANCHOR_SECTION_RE = re.compile(r"^(?:section|sec)-(\d+(?:\.\d+)*)$", re.IGNORECASE)
+
+
+def anchor_slug(title: str) -> str:
+    """A heading's title reduced to the anchor a renderer would give it."""
+    slug = _normalize(title).lower()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    return re.sub(r"[\s_]+", "-", slug).strip("-")
+
+
+def selector_for_title(title: str) -> str | None:
+    """A selector that names this heading, or None if the grammar cannot.
+
+    Prefers the section number, which is short and unambiguous. Falls back to
+    the literal title, quoted when it contains a comma — and gives up rather
+    than emit something that would parse as a different selector than intended.
+    """
+    number = _title_prefix_number(title)
+    if number:
+        return f"§ {number}"
+    if "'" in title:
+        return None if "," in title else title
+    return f"'{title}'" if "," in title else title
+
+
+def _headings(node: SectionNode) -> list[SectionNode]:
+    out: list[SectionNode] = []
+    for child in node.children:
+        out.append(child)
+        out.extend(_headings(child))
+    return out
+
+
+def selector_for_anchor(body: str, anchor: str, fmt) -> str | None:
+    """The section a URL fragment points at, or None to leave the scope alone.
+
+    An anchor is targeting the author already wrote down, and until now nothing
+    read it: `rfc9110.html#section-7.2` was checked against the whole of RFC 9110.
+
+    Two ways it is understood, and one firm refusal:
+
+    * ``#section-7.2`` — the rfc-editor convention, and unambiguous. It is taken
+      at its word, so a section that is not there *fails*, rather than quietly
+      widening back to the whole document and passing.
+    * any other anchor — looked up **in the document**. If it names a heading,
+      that heading's section is the scope.
+    * anything else — **declined**. In the Fetch spec, `#cors-safelisted-request-header`
+      sits on an inline `<dfn>` and `#origin-header` on an `<h3>`: turning the
+      first into a CSS selector would narrow the scope to a two-word term and
+      fail every honest citation of the sentence around it. An anchor says where
+      the author was looking, not always what they meant to quote — and where we
+      cannot tell, we do not narrow. Our guess must not be able to condemn a
+      citation.
+    """
+    if not anchor or not hasattr(fmt, "sections"):
+        return None
+
+    match = _ANCHOR_SECTION_RE.match(anchor)
+    if match:
+        return f"§ {match.group(1)}"
+
+    title = _title_for_anchor(body, anchor, fmt)
+    return selector_for_title(title) if title else None
+
+
+def _title_for_anchor(body: str, anchor: str, fmt) -> str | None:
+    """The heading this anchor is attached to, if it is attached to one."""
+    by_id = getattr(fmt, "heading_by_id", None)
+    if by_id is not None:
+        found = by_id(body, anchor)
+        if found:
+            return str(found)
+
+    wanted = anchor_slug(anchor)
+    for node in _headings(fmt.sections(body)):
+        if anchor_slug(node.title) == wanted:
+            return node.title
+    return None
+
+
 def locate_section(body: str, snippet: str, fmt) -> LocateResult | None:
     """High-level: build section tree, generate a sourceSection selector.
 

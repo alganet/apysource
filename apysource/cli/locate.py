@@ -4,7 +4,6 @@
 
 """Locate a snippet at a URL and emit YAML or TTL output."""
 
-import re
 import sys
 
 import yaml
@@ -27,17 +26,16 @@ from apysource.sections import locate_section
 
 
 def _extract_title(body: str, fmt: ContentFormat) -> str:
-    """Extract a document title from the page content."""
-    if fmt.name == "html":
-        m = re.search(r"<title[^>]*>(.*?)</title>", body, re.DOTALL | re.IGNORECASE)
-        if m:
-            return re.sub(r"\s+", " ", m.group(1)).strip()
-    # For structured text formats, use the first heading
-    if hasattr(fmt, "sections"):
-        root = fmt.sections(body)
-        if root.children:
-            return str(root.children[0].title)
-    return ""
+    """What the document calls itself — the format's own answer.
+
+    This asked the format for its first *section heading*, which is a different
+    thing and is why `add` labelled an RFC source `1. Introduction`. An RFC
+    states its title in its header block; an HTML page states it in `<title>`;
+    a flat text file does not state one at all, and now says so instead of
+    offering up a heading that is not a title.
+    """
+    title = getattr(fmt, "title", None)
+    return str(title(body)) if title is not None else ""
 
 
 def _warn_if_redirected(http_client, url: str) -> None:

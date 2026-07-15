@@ -23,13 +23,13 @@ from typing import cast
 from rdflib import Graph, URIRef
 from rdflib.namespace import DCTERMS, RDF, RDFS
 
-from apysource.formats import extract_content, truncate
-from apysource.http import CachedFetcher, document_url
+from apysource.formats import detect_format, extract_content, truncate
+from apysource.http import CachedFetcher, document_url, url_anchor
 from apysource.namespaces import OA, SCHEMA, SV
 from apysource.repos import RepoRegistry
 from apysource.repos._base import BaseRepo
 from apysource.repos.errors import RepoNotFound, RepoUnavailable
-from apysource.sections import SectionNotFound
+from apysource.sections import SectionNotFound, selector_for_anchor
 from apysource.results import FetcherResult, RepoResult, ResolveResult, TextOutcome
 
 
@@ -156,6 +156,7 @@ def resolve_chain(g: Graph, frag_uri: URIRef, registry: RepoRegistry,
         return ResolveResult(status="no_url", label=label, source=source_label)
 
     format_name, locator = _targeting(g, frag_uri, source)
+    anchor = url_anchor(url)
 
     repo, key, cache_file, fallback = _resolve_repo(registry, url, location)
     if repo is not None:
@@ -164,7 +165,7 @@ def resolve_chain(g: Graph, frag_uri: URIRef, registry: RepoRegistry,
             label=label, location=location, source=source_label,
             url=url, module=repo.NAME, repo=repo, key=key,
             cache_file=str(cache_file) if cache_file else None,
-            format_name=format_name, locator=locator,
+            format_name=format_name, locator=locator, anchor=anchor,
         )
 
     if fetcher:
@@ -173,6 +174,7 @@ def resolve_chain(g: Graph, frag_uri: URIRef, registry: RepoRegistry,
             status="resolved", label=label, location=location,
             source=source_label, url=url,
             fetcher=fetcher, format_name=format_name, locator=locator,
+            anchor=anchor,
             fallback_from=matched.NAME if matched and fallback else "",
             fallback_reason=fallback,
         )
@@ -195,6 +197,7 @@ def resolve_direct(g: Graph, entity_uri: URIRef, registry: RepoRegistry,
         return ResolveResult(status="no_url", label=label)
 
     format_name, locator = _targeting(g, entity_uri, entity_uri)
+    anchor = url_anchor(url)
 
     repo, key, cache_file, fallback = _resolve_repo(registry, url, location)
     if repo is not None:
@@ -203,7 +206,7 @@ def resolve_direct(g: Graph, entity_uri: URIRef, registry: RepoRegistry,
             url=url, location=location, module=repo.NAME,
             repo=repo, key=key,
             cache_file=str(cache_file) if cache_file else None,
-            format_name=format_name, locator=locator,
+            format_name=format_name, locator=locator, anchor=anchor,
         )
 
     if fetcher:
@@ -211,11 +214,30 @@ def resolve_direct(g: Graph, entity_uri: URIRef, registry: RepoRegistry,
         return FetcherResult(
             status="resolved", label=label, url=url, location=location,
             fetcher=fetcher, format_name=format_name, locator=locator,
+            anchor=anchor,
             fallback_from=matched.NAME if matched and fallback else "",
             fallback_reason=fallback,
         )
 
     return ResolveResult(status="no_module", label=label, url=url)
+
+
+def _apply_targeting(result: ResolveResult, text: str) -> tuple[str, str | None]:
+    """The format and locator to extract with, once the document is in hand.
+
+    An explicit ``section:``/``selector:`` always wins — the author said it
+    outright. Only when they said nothing do we read the anchor their URL was
+    already carrying, and only where we can be sure what it points at.
+    """
+    format_name = getattr(result, "format_name", "")
+    locator = getattr(result, "locator", None)
+    if locator or not result.anchor:
+        return format_name, locator
+
+    inferred = selector_for_anchor(text, result.anchor, detect_format(text))
+    if inferred is None:
+        return format_name, locator
+    return "section", inferred
 
 
 def _load_repo_text(result: RepoResult, max_chars: int | None, *,
@@ -285,10 +307,11 @@ def _load_repo_text(result: RepoResult, max_chars: int | None, *,
     # URL verified green, because the repo returned the whole page and the
     # snippet was found somewhere in it. The identical fragment on a fetched URL
     # failed, correctly. Which answer you got depended on who served the file.
-    if result.locator:
+    format_name, locator = _apply_targeting(result, text)
+    if locator:
         try:
-            text = extract_content(text, result.locator,
-                                   format_name=result.format_name, strict=True)
+            text = extract_content(text, locator,
+                                   format_name=format_name, strict=True)
         except SectionNotFound as e:
             return TextOutcome("", "no_section", e.message)
 
@@ -313,9 +336,10 @@ def load_text(result: ResolveResult, max_chars: int | None = 5000, *,
         if not body:
             return TextOutcome("", "unavailable", f"could not fetch {result.url}")
 
+        format_name, locator = _apply_targeting(result, body)
         try:
             text = extract_content(
-                body, result.locator, format_name=result.format_name,
+                body, locator, format_name=format_name,
                 strict=True,
             )
         except SectionNotFound as e:

@@ -46,6 +46,15 @@ class ContentFormat(Protocol):
         """
         ...
 
+    def title(self, body: str) -> str:
+        """What this document is called, or "" if it does not say.
+
+        A document's title and its first heading are different things, and
+        conflating them made ``add`` label a source `1. Introduction` — the first
+        heading of every RFC ever written.
+        """
+        ...
+
     def extract(self, body: str, locator: str) -> str:
         """Extract content from body using a format-specific locator."""
         ...
@@ -132,6 +141,24 @@ BLOCK_TAGS = frozenset({
 })
 
 
+#: `title:` inside a leading YAML front-matter block (MDN, Jekyll, Hugo, …).
+_FRONT_MATTER_TITLE = re.compile(
+    r"^---\s*\n(?:.*\n)*?title:\s*(.+?)\s*\n(?:.*\n)*?---\s*$",
+    re.MULTILINE,
+)
+
+
+def _first_heading_title(fmt, body: str) -> str:
+    """The first top-level heading, for formats whose title *is* one.
+
+    True of Markdown and wikitext, where the opening `# Heading` names the
+    document. Emphatically *not* true of an RFC, whose first heading is
+    `1. Introduction` — which is what `add` used to call every RFC it saw.
+    """
+    root = fmt.sections(body)
+    return root.children[0].title if root.children else ""
+
+
 def html_text(node) -> str:
     """The rendered text of an HTML node, with block boundaries kept apart.
 
@@ -196,6 +223,25 @@ class HtmlFormat:
     def text(self, body: str) -> str:
         """The page as a reader sees it: no markup, no head, no scripts."""
         return html_text(self._content(body))
+
+    def title(self, body: str) -> str:
+        """The `<title>`, which is what the page calls itself."""
+        tag = self._soup(body).find("title")
+        return _normalize(tag.get_text()) if tag else ""
+
+    def heading_by_id(self, body: str, anchor: str) -> str | None:
+        """The heading carrying this id, or None if the id is on something else.
+
+        HTML says outright what an anchor points at, so there is no need to guess
+        from the slug. The answer is often "not a heading": in the Fetch spec
+        `#cors-safelisted-request-header` is on an inline `<dfn>`. Then this
+        returns None, and the caller leaves the scope alone rather than narrow a
+        citation down to a two-word term.
+        """
+        element = self._content(body).find(id=anchor)
+        if element is None or element.name not in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            return None
+        return _normalize(html_text(element))
 
     def strip_tags(self, body: str) -> str:
         """Convert HTML to plain text.
@@ -323,6 +369,18 @@ class MarkdownFormat:
         """
         return body
 
+    def title(self, body: str) -> str:
+        """Front matter first, then the first heading.
+
+        A Markdown file that carries YAML front matter states its title there,
+        and it is not the same as its first heading — MDN's `Origin` page opens
+        with `## Syntax`, so the heading rule called that page "Syntax".
+        """
+        front = _FRONT_MATTER_TITLE.match(body)
+        if front:
+            return _normalize(front.group(1)).strip("'\"")
+        return _first_heading_title(self, body)
+
     def sections(self, body: str):
         """Build a SectionNode tree from Markdown ATX headings."""
         from apysource.sections import SectionNode
@@ -403,6 +461,10 @@ class WikitextFormat:
     def text(self, body: str) -> str:
         """Wikitext source, unrendered — same reasoning as Markdown."""
         return body
+
+    def title(self, body: str) -> str:
+        """A wiki page's title is its first top-level heading."""
+        return _first_heading_title(self, body)
 
     def sections(self, body: str):
         """Build a SectionNode tree from Wikitext headings."""
@@ -519,6 +581,28 @@ class RfcTextFormat:
         """
         return self._clean_body(body)
 
+    def title(self, body: str) -> str:
+        """The RFC's own title, from its header block.
+
+        An RFC prints its title centred between the author column and the
+        ``Abstract``/``Status of this Memo`` that follows it — so it is the run
+        of lines immediately before that heading. Falling back to the first
+        *section* heading, as the generic rule does, labelled every RFC in
+        existence `1. Introduction`.
+        """
+        head = self._clean_body(body).split("\n")[:60]
+        for i, line in enumerate(head):
+            if re.match(r"^(Abstract|Status of [Tt]his Memo)\b", line):
+                title: list[str] = []
+                for prev in reversed(head[:i]):
+                    if not prev.strip():
+                        if title:
+                            break
+                        continue
+                    title.insert(0, prev.strip())
+                return _normalize(" ".join(title))
+        return ""
+
     def sections(self, body: str):
         """Build a SectionNode tree from RFC dotted-number headings."""
         from apysource.sections import SectionNode
@@ -592,6 +676,13 @@ class PlainTextFormat:
     def text(self, body: str) -> str:
         """A plain-text file is already its own text."""
         return body
+
+    def title(self, body: str) -> str:
+        """A flat text file does not say what it is called, so we do not guess.
+
+        `add` falls back to the URL, which is at least true.
+        """
+        return ""
 
     def extract(self, body: str, locator: str) -> str:
         """Extract a line range from text. Format: 'N-M' (1-based, inclusive)."""

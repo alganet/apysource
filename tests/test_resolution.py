@@ -721,3 +721,93 @@ def test_a_repo_section_scopes_the_snippet_like_a_fetched_one(tmp_path):
     assert wrong.status == "ok"
     assert sentence not in wrong.text, \
         "the sentence is not in § Syntax; the section must scope the match"
+
+
+# ── The anchor the citation already carried (C3) ─────────────────────────
+
+_RFC_ISH = ("# 7. Fields\nFields are things.\n\n"
+            "## 7.2 Host\nThe Host header field provides the host and port.\n\n"
+            "# 15. Status Codes\nA status code is a three-digit integer.\n")
+
+
+def _anchored(url, section=None):
+    frag = URIRef("urn:test:frag")
+    g = build_chain_graph(frag, URIRef("urn:test:src"), url, location="")
+    g.add((URIRef("urn:test:src"), DCTERMS.format, Literal("text/markdown")))
+    if section:
+        target = g.value(frag, OA.hasTarget)
+        sel = BNode()
+        g.add((target, OA.hasSelector, sel))
+        g.add((sel, RDF.type, SV.SectionSelector))
+        g.add((sel, RDF.value, Literal(section)))
+    return g, frag
+
+
+def test_an_anchor_scopes_the_check_to_the_section_it_names():
+    """`rfc9110.html#section-7.2` was checked against the whole of RFC 9110.
+
+    The anchor is targeting the author already wrote down, in their own hand,
+    and nothing read it. lint-http's ~350 references all carry one.
+    """
+    fetcher = MockFetcher(content=_RFC_ISH)
+    g, frag = _anchored("https://example.com/spec#section-7.2")
+    out = load_text(resolve_chain(g, frag, EMPTY_REGISTRY, fetcher=fetcher),
+                    max_chars=None)
+
+    assert out.status == "ok"
+    assert "Host header field" in out.text
+    assert "three-digit integer" not in out.text, \
+        "the anchor names § 7.2; § 15 must not be in scope"
+
+
+def test_a_quote_from_the_wrong_section_now_fails():
+    """The point of scoping. This used to pass against the whole document."""
+    fetcher = MockFetcher(content=_RFC_ISH)
+    g, frag = _anchored("https://example.com/spec#section-7.2")
+    out = load_text(resolve_chain(g, frag, EMPTY_REGISTRY, fetcher=fetcher),
+                    max_chars=None)
+    assert "three-digit integer" not in out.text
+
+
+def test_an_explicit_section_beats_the_anchor():
+    """The author said it outright; a guess must not override a statement."""
+    fetcher = MockFetcher(content=_RFC_ISH)
+    g, frag = _anchored("https://example.com/spec#section-7.2",
+                        section="§ 15")
+    out = load_text(resolve_chain(g, frag, EMPTY_REGISTRY, fetcher=fetcher),
+                    max_chars=None)
+
+    assert out.status == "ok"
+    assert "three-digit integer" in out.text
+    assert "Host header field" not in out.text
+
+
+def test_an_anchor_we_cannot_read_leaves_the_scope_alone():
+    """A guess of ours must never be able to condemn a citation.
+
+    `#page-42` names no section. We do not narrow, we do not fail — we check the
+    whole document, exactly as before anchors were read at all.
+    """
+    fetcher = MockFetcher(content=_RFC_ISH)
+    g, frag = _anchored("https://example.com/spec#page-42")
+    out = load_text(resolve_chain(g, frag, EMPTY_REGISTRY, fetcher=fetcher),
+                    max_chars=None)
+
+    assert out.status == "ok"
+    assert "Host header field" in out.text
+    assert "three-digit integer" in out.text
+
+
+def test_an_anchor_naming_a_section_that_is_gone_says_so():
+    """`#section-99.9` is the author's claim about the document, and it is false.
+
+    Widening back to the whole document would let the citation pass and hide the
+    rot. This is the one inference confident enough to fail on.
+    """
+    fetcher = MockFetcher(content=_RFC_ISH)
+    g, frag = _anchored("https://example.com/spec#section-99.9")
+    out = load_text(resolve_chain(g, frag, EMPTY_REGISTRY, fetcher=fetcher),
+                    max_chars=None)
+
+    assert out.status == "no_section"
+    assert "99.9" in out.reason

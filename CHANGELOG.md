@@ -67,6 +67,21 @@ All notable changes to this project are documented here. The format is based on
   path, so a project directory containing those words no longer hides every `.ttl` file.
 
 ### Added
+- **The `#section-7.2` in a citation's URL is now read as targeting.** It always was
+  targeting — the author wrote down where in the document they were looking — and nothing
+  read it: `rfc9110.html#section-7.2` was verified against the whole of RFC 9110, all 502,907
+  characters of it. An anchor now scopes the check to the section it names, so a quote that has
+  drifted to a different section is caught instead of passing because the words appear *somewhere*.
+  Two forms are understood: the rfc-editor `#section-7.2` convention, and any anchor that names a
+  **heading** in the document (WHATWG's `#origin-header` is on an `<h3>`, so it resolves to `§ 3.2`).
+  Anything else is **left alone, deliberately**: in the Fetch spec `#cors-safelisted-request-header`
+  sits on an inline `<dfn>`, and narrowing to it would cut the scope down to a two-word term and
+  fail every honest citation of the sentence around it. An anchor says where the author was
+  *looking*, not always what they meant to quote, and a guess of ours must never be able to condemn
+  a citation. An explicit `section:` or `selector:` always wins — a statement outranks an inference.
+  The one exception to "never fail on a guess" is `#section-99.9`, which is unambiguous: a document
+  that has no such section is told so, rather than quietly widening back to the whole text and
+  passing.
 - **`check --format json`.** The report as data, on stdout, with everything else on stderr. Each
   failure carries the source and fragment *labels* — what you wrote in the YAML, and what you route
   on: label a fragment with the file that made the claim and the JSON hands that file straight back
@@ -140,6 +155,11 @@ All notable changes to this project are documented here. The format is based on
 - `ruff` linting/formatting, wired into `make lint`/`make format` and the `make check` gate.
 
 ### Changed
+- **`add` labels a source by its title, not by its first heading.** It called every RFC it ever
+  saw `1. Introduction`, because it asked the format for its first *section heading* — and for an
+  RFC that is always § 1. An RFC states its title in its header block, an HTML page in `<title>`,
+  a Markdown file in its front matter; a flat text file states none, and now says so instead of
+  offering up a heading that is not a title. `add` falls back to the URL, which is at least true.
 - **A failure is now reported by the names its author gave it**, not by the slugified URN the
   loader made of them — which was printed twice, once as the group header and once as the line
   prefix. `urn:apysource:fragment_mdn_origin_stale_pre_redirect_url_mdn_stale` is now

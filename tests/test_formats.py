@@ -312,3 +312,38 @@ def test_locate_never_returns_a_selector_that_does_not_lead_back():
     assert not _selector_yields(soup, "main p:nth-of-type(1)",
                                 normalize_ws("Responses MUST include a Vary header."))
     assert not _selector_yields(soup, "p[[[bad", normalize_ws("anything"))
+
+
+# ── A title is not the first heading (C2) ───────────────────────────────
+
+def test_an_rfc_is_labelled_by_its_title_not_by_section_one():
+    """`add` called every RFC it saw "1. Introduction".
+
+    It asked the format for its first *section heading*, which for an RFC is
+    always § 1. An RFC prints its real title in its header block, centred above
+    the Abstract.
+    """
+    from pathlib import Path
+    body = (Path(__file__).parent / "fixtures" / "rfc2616.txt").read_text(
+        encoding="utf-8")
+    fmt = detect_format(body)
+
+    assert fmt.title(body) == "Hypertext Transfer Protocol -- HTTP/1.1"
+    assert "Introduction" not in fmt.title(body)
+
+
+def test_a_markdown_title_comes_from_front_matter_when_there_is_some():
+    """MDN's Origin page opens with `## Syntax`, so the heading rule named it that."""
+    from apysource.formats import MarkdownFormat
+    doc = "---\ntitle: Origin\nslug: Web/HTTP/Headers/Origin\n---\n\n## Syntax\n\nOrigin: null\n"
+    assert MarkdownFormat().title(doc) == "Origin"
+
+
+def test_a_flat_text_file_does_not_invent_a_title():
+    """It has none. `add` falls back to the URL, which is at least true."""
+    assert PlainTextFormat().title("just some words\nand more words\n") == ""
+
+
+def test_an_html_page_is_titled_by_its_title_tag():
+    page = "<html><head><title>Fetch Standard</title></head><body><h1>1. Scope</h1></body></html>"
+    assert HtmlFormat().title(page) == "Fetch Standard"
