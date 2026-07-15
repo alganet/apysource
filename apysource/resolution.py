@@ -159,16 +159,20 @@ def resolve_chain(g: Graph, frag_uri: URIRef, registry: RepoRegistry,
 def resolve_direct(g: Graph, entity_uri: URIRef, registry: RepoRegistry,
                     fetcher: CachedFetcher | None = None) -> ResolveResult:
     """Resolve any entity with schema:url directly on it."""
+    # A Term is required to carry an rdfs:label (the SHACL shapes say so), and
+    # it was being dropped on the floor here — so a Term failure had nothing to
+    # report itself by except its URI.
+    label = str(g.value(entity_uri, RDFS.label) or "")
     url = str(g.value(entity_uri, SCHEMA.url) or "")
     location = str(g.value(entity_uri, SV.sourceLocation) or "")
 
     if not url:
-        return ResolveResult(status="no_url")
+        return ResolveResult(status="no_url", label=label)
 
     repo, key, cache_file, fallback = _resolve_repo(registry, url, location)
     if repo is not None:
         return RepoResult(
-            status="resolved",
+            status="resolved", label=label,
             url=url, location=location, module=repo.NAME,
             repo=repo, key=key,
             cache_file=str(cache_file) if cache_file else None,
@@ -186,13 +190,13 @@ def resolve_direct(g: Graph, entity_uri: URIRef, registry: RepoRegistry,
             locator = (css or lines) or None
         matched = registry.get_repo(url)
         return FetcherResult(
-            status="resolved", url=url, location=location,
+            status="resolved", label=label, url=url, location=location,
             fetcher=fetcher, format_name=format_name, locator=locator,
             fallback_from=matched.NAME if matched and fallback else "",
             fallback_reason=fallback,
         )
 
-    return ResolveResult(status="no_module", url=url)
+    return ResolveResult(status="no_module", label=label, url=url)
 
 
 def _load_repo_text(result: RepoResult, max_chars: int, *,

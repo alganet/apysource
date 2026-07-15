@@ -38,6 +38,30 @@ def strip_headers(text: str) -> str:
     return "\n".join(content).strip()
 
 
+def _failure(result: Any, uri: URIRef, reason: str,
+             hint: Any = None) -> Failure:
+    """Name a failure the way its author would recognize it.
+
+    The labels are what someone wrote in the YAML; the URN is what the loader
+    made of them, by gluing the source and fragment labels together and
+    slugifying the result. Reporting the URN — twice, as it happens — made the
+    reader de-slugify their own file to find out what had failed, and mangled
+    the separators on the way (``/`` became ``_``), so grepping the report for
+    a rule id did not work either.
+
+    The URN is still carried, because it is the stable identity and the subject
+    of the provenance graph. It is simply not what a person should have to read.
+    """
+    return Failure(
+        group=result.source or "(no source)",
+        item=result.label or local_name(uri),
+        reason=reason,
+        hint=hint,
+        url=result.url,
+        urn=str(uri),
+    )
+
+
 def _redirect_check(name: str, results: list[Any],
                     strict: bool = False) -> CheckResult:
     """Report source URLs that were answered by a different URL.
@@ -75,6 +99,7 @@ def _redirect_check(name: str, results: list[Any],
                 result.source or "source", result.url,
                 "destination not recorded; run --refresh to check whether "
                 "this URL still answers for itself",
+                url=result.url,
             ))
         elif info.redirected:
             hops = " -> ".join(f"{status} {hop}" for status, hop in info.chain)
@@ -82,6 +107,7 @@ def _redirect_check(name: str, results: list[Any],
                 result.source or "source", result.url,
                 f"moved: {hops} -> {info.final_url}. The snippet was verified "
                 f"against the destination, not this URL; update it.",
+                url=result.url,
             ))
         else:
             ok += 1
@@ -138,6 +164,7 @@ def _repo_check(name: str, results: list[Any], strict: bool = False) -> CheckRes
                     f"{outcome.repo} has no such document: {outcome.key}. "
                     f"The page this cites has moved or been removed; the URL "
                     f"may still redirect somewhere, but the source does not.",
+                    url=result.url,
                 ))
             else:
                 records.append(Failure(
@@ -145,6 +172,7 @@ def _repo_check(name: str, results: list[Any], strict: bool = False) -> CheckRes
                     f"{outcome.repo} could not fetch {outcome.key}"
                     + (f": {outcome.reason}" if outcome.reason else "")
                     + ". Whether the document exists is unknown.",
+                    url=result.url,
                 ))
 
         elif isinstance(result, FetcherResult) and result.fallback_from:
@@ -156,6 +184,7 @@ def _repo_check(name: str, results: list[Any], strict: bool = False) -> CheckRes
                 f"{result.fallback_from} claims this URL but "
                 f"{result.fallback_reason}. The snippet was verified against "
                 f"the fetched page, not against {result.fallback_from}.",
+                url=result.url,
             ))
 
     total = ok + len(records)
@@ -230,8 +259,8 @@ def run_checks(
                 direct_resolved.append(result)
                 if result.status != "resolved":
                     loc = str(g.value(entity, SV.sourceLocation) or "")
-                    fail_list.append(Failure(local_name(entity), local_name(entity),
-                                            f'"{loc}" -> {result.status}'))
+                    fail_list.append(
+                        _failure(result, entity, f'"{loc}" -> {result.status}'))
                     continue
 
                 outcome = load_text(result, max_chars=50000, force=force,
@@ -246,8 +275,8 @@ def run_checks(
                     # one indistinguishable "empty extraction".
                     detail = (outcome.reason if outcome.status != "ok"
                               else f"empty extraction ({len(clean)} chars)")
-                    fail_list.append(Failure(local_name(entity), local_name(entity),
-                                            f'"{loc}" -> {detail}'))
+                    fail_list.append(
+                        _failure(result, entity, f'"{loc}" -> {detail}'))
 
             results.append(CheckResult(name, len(ok_list), len(entities), fail_list))
             resolved_sources.extend(direct_resolved)
@@ -300,8 +329,8 @@ def _run_chain_checks(
             cache_ok.append(frag)
         else:
             loc = str(g.value(frag, SV.sourceLocation) or "")
-            cache_fail.append(Failure(local_name(frag), local_name(frag),
-                                      f'"{loc}" -> {result.status}'))
+            cache_fail.append(
+                _failure(result, frag, f'"{loc}" -> {result.status}'))
 
     checks.append(CheckResult(f"{base_name}: cache resolution",
                               len(cache_ok), len(fragments), cache_fail))
@@ -313,8 +342,7 @@ def _run_chain_checks(
         result = resolved[frag]
         if result.status != "resolved":
             loc = str(g.value(frag, SV.sourceLocation) or "")
-            extract_fail.append(Failure(local_name(frag), local_name(frag),
-                                        f'"{loc}" -> no cache'))
+            extract_fail.append(_failure(result, frag, f'"{loc}" -> no cache'))
             continue
 
         # Force a refresh (re-fetch, and re-crawl) during the extraction phase
@@ -331,8 +359,7 @@ def _run_chain_checks(
             # for things the citation had nothing to do with.
             detail = (outcome.reason if outcome.status != "ok"
                       else f"empty extraction ({len(clean)} chars)")
-            extract_fail.append(Failure(local_name(frag), local_name(frag),
-                                        f'"{loc}" -> {detail}'))
+            extract_fail.append(_failure(result, frag, f'"{loc}" -> {detail}'))
         else:
             extract_ok.append(frag)
 
@@ -357,8 +384,8 @@ def _run_chain_checks(
 
         result = resolved[frag]
         if result.status != "resolved":
-            snippet_fail.append(Failure(local_name(frag), local_name(frag),
-                                        "cache not resolved for verification"))
+            snippet_fail.append(
+                _failure(result, frag, "cache not resolved for verification"))
             continue
 
         # No force here: the extraction phase above already refreshed and
@@ -368,8 +395,8 @@ def _run_chain_checks(
             # The source never arrived. Running the snippet against the empty
             # string would report "snippet not found" — blaming the quote for
             # a page that was missing or a fetch that failed.
-            snippet_fail.append(Failure(local_name(frag), local_name(frag),
-                                        loaded.reason or "source unavailable"))
+            snippet_fail.append(
+                _failure(result, frag, loaded.reason or "source unavailable"))
             if prov_graph is not None:
                 prov_graph.add((frag, SV.verificationStatus, Literal("failed")))
             continue
@@ -385,12 +412,9 @@ def _run_chain_checks(
         else:
             # Diagnose from the text already in hand — the extraction is
             # right here, and re-fetching to diff it would be absurd.
-            # Diagnose from the text already in hand — the extraction is
-            # right here, and re-fetching to diff it would be absurd.
             where = result.locator if isinstance(result, FetcherResult) else ""
-            snippet_fail.append(Failure(
-                local_name(frag), local_name(frag),
-                "snippet not found in extracted content",
+            snippet_fail.append(_failure(
+                result, frag, "snippet not found in extracted content",
                 diagnose(norm_snippet, norm_source, where=where or ""),
             ))
             if prov_graph is not None:
@@ -403,17 +427,26 @@ def _run_chain_checks(
 
 
 def _print_records(records: list[Failure]) -> None:
-    """Print failures (or warnings) grouped by their source."""
+    """Print failures (or warnings) grouped by their source.
+
+    The group header names the source and the URL it was checked at, because
+    the URL is the thing you go and look at; the lines under it name the
+    fragments. Both used to be the same slugified URN, printed twice.
+    """
     if not records:
         return
 
-    by_group = defaultdict(list)
+    by_group: defaultdict[tuple[str, str], list[Failure]] = defaultdict(list)
     for f in records:
-        by_group[f.group].append(f)
+        by_group[(f.group, f.url)].append(f)
 
-    for group in sorted(by_group, key=lambda t: -len(by_group[t])):
-        items = by_group[group]
-        print(f"         {group}/ ({len(items)})")
+    for group, url in sorted(by_group, key=lambda t: -len(by_group[t])):
+        items = by_group[(group, url)]
+        # The URL-level checks itemize *by* URL, so printing it in the header
+        # too would just say the same thing twice.
+        redundant = all(f.item == url for f in items)
+        where = f" ({url})" if url and not redundant else ""
+        print(f"         {group}{where} ({len(items)})")
         for f in items:
             print(f"           {f.item}: {f.reason}")
             if f.hint is not None:

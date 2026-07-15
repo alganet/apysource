@@ -7,7 +7,7 @@
 from unittest.mock import patch
 
 from rdflib import BNode, Graph, Literal, URIRef
-from rdflib.namespace import PROV, RDF
+from rdflib.namespace import PROV, RDF, RDFS
 
 from apysource.namespaces import OA, SCHEMA, SV
 from apysource.diagnostics import Diagnosis
@@ -636,3 +636,110 @@ def test_the_repo_check_is_absent_without_repos():
         results = run_checks(g, checks_config, EMPTY_REGISTRY,
                              fetcher=MockFetcher())
     assert all(c.name != "Repo documents" for c in results)
+
+
+# ── Naming failures (A3) ─────────────────────────────────────────────────
+#
+# A failure used to be reported as the slugified URN the loader made by gluing
+# the source and fragment labels together — printed twice, once as the group
+# header and once as the line prefix. The author then had to de-slugify their
+# own YAML to find out what had failed.
+
+def _named_run(source_label, frag_label, url, snippet=None, text="x" * 100):
+    frag = URIRef("http://x/frag")
+    src = URIRef("http://x/src")
+    g = build_chain_graph(frag, src, url, location="", label=frag_label)
+    g.set((src, RDFS.label, Literal(source_label)))
+    if snippet is not None:
+        target = next(g.objects(frag, OA.hasTarget))
+        sel = BNode()
+        g.add((target, OA.hasSelector, sel))
+        g.add((sel, RDF.type, OA.TextQuoteSelector))
+        g.add((sel, OA.exact, Literal(snippet)))
+
+    checks_config = [{"name": "Fragments", "class_uri": SV.Fragment, "mode": "chain"}]
+    with patch("apysource.verification.load_text",
+               return_value=TextOutcome(text)):
+        results = run_checks(g, checks_config, EMPTY_REGISTRY,
+                             fetcher=MockFetcher())
+    return {c.name: c for c in results}
+
+
+def test_a_failure_names_the_source_and_the_fragment():
+    """The live MDN case: the labels the author wrote, not a mangled URN."""
+    checks = _named_run(
+        "MDN: Origin (stale pre-redirect URL)", "mdn_stale",
+        "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Origin",
+        snippet="a quote long enough to actually be verified",
+    )
+    failure = checks["Fragments: snippet verified"].failures[0]
+
+    assert failure.group == "MDN: Origin (stale pre-redirect URL)"
+    assert failure.item == "mdn_stale"
+    assert failure.url == (
+        "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Origin")
+    # The URN is still carried — it is the identity, and the provenance
+    # subject — it is simply not what a person is made to read.
+    assert failure.urn.startswith("http://x/frag")
+
+
+def test_a_failure_does_not_print_the_urn(capsys):
+    """What the reader actually sees."""
+    checks = _named_run(
+        "MDN: Origin (stale pre-redirect URL)", "mdn_stale",
+        "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Origin",
+        snippet="a quote long enough to actually be verified",
+    )
+    print_report(list(checks.values()))
+    out = capsys.readouterr().out
+
+    assert "MDN: Origin (stale pre-redirect URL)" in out
+    assert "mdn_stale" in out
+    assert "urn:apysource:" not in out
+
+
+def test_a_label_with_a_slash_survives_the_report():
+    """The URN mangles separators (`/` -> `_`), so grepping the report failed.
+
+    lint-http labels fragments by rule-file path; the slug ate the paths.
+    """
+    checks = _named_run("RFC 9110", "helpers/headers.rs",
+                        "https://www.rfc-editor.org/rfc/rfc9110.txt",
+                        snippet="a quote long enough to actually be verified")
+    assert checks["Fragments: snippet verified"].failures[0].item == \
+        "helpers/headers.rs"
+
+
+def test_a_fragment_with_no_source_still_reports_something():
+    """The no_source path leaves the labels empty. A blank name is worse than an ugly one."""
+    frag = URIRef("http://example.com/data#orphan")
+    g = Graph()
+    g.add((frag, RDF.type, SV.Fragment))
+    g.add((frag, RDFS.label, Literal("orphaned")))
+
+    checks_config = [{"name": "F", "class_uri": SV.Fragment, "mode": "chain"}]
+    results = run_checks(g, checks_config, EMPTY_REGISTRY, fetcher=MockFetcher())
+    failure = next(c for c in results if "cache resolution" in c.name).failures[0]
+
+    assert failure.group == "(no source)"
+    assert failure.item == "orphaned"   # the fragment label survives
+    assert failure.reason.endswith("no_source")
+
+
+def test_a_term_failure_carries_its_label():
+    """resolve_direct never read the Term's rdfs:label, though SHACL mandates one."""
+    term = URIRef("http://example.com/data#term1")
+    g = Graph()
+    g.add((term, RDF.type, SV.Term))
+    g.add((term, RDFS.label, Literal("aletheia")))
+    g.add((term, SCHEMA.url, Literal("http://example.com/lexicon")))
+
+    checks_config = [{"name": "Terms", "class_uri": SV.Term, "mode": "direct"}]
+    with patch("apysource.verification.load_text",
+               return_value=TextOutcome("", "unavailable", "could not fetch")):
+        results = run_checks(g, checks_config, EMPTY_REGISTRY,
+                             fetcher=MockFetcher())
+
+    failure = results[0].failures[0]
+    assert failure.item == "aletheia"
+    assert failure.url == "http://example.com/lexicon"

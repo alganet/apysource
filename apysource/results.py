@@ -126,6 +126,16 @@ class Redirect:
 class Failure:
     """A single verification failure.
 
+    ``group`` and ``item`` are what a human reads: the source this failed
+    under, and which fragment of it. They were both the same slugified URN
+    until this carried enough to say otherwise — the report printed
+    ``urn:apysource:fragment_mdn_origin_stale_pre_redirect_url_mdn_stale``
+    twice, and left the author to de-slugify their own labels.
+
+    ``url`` and ``urn`` are what a machine reads. The URN stays the stable
+    identity — it is the subject of the provenance graph — while the label
+    is what someone wrote in the YAML and would grep for.
+
     ``hint`` carries the diagnosis when there is one — the passage the
     source actually contains, and how it differs from what was cited. It
     is kept as data, not as rendered lines, so a machine-readable report
@@ -136,6 +146,8 @@ class Failure:
     item: str
     reason: str
     hint: Diagnosis | None = None
+    url: str = ""
+    urn: str = ""
 
 
 @dataclass
