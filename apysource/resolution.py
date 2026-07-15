@@ -29,6 +29,7 @@ from apysource.namespaces import OA, SCHEMA, SV
 from apysource.repos import RepoRegistry
 from apysource.repos._base import BaseRepo
 from apysource.repos.errors import RepoNotFound, RepoUnavailable
+from apysource.sections import SectionNotFound
 from apysource.results import FetcherResult, RepoResult, ResolveResult, TextOutcome
 
 
@@ -272,9 +273,17 @@ def load_text(result: ResolveResult, max_chars: int = 5000, *,
         if not body:
             return TextOutcome("", "unavailable", f"could not fetch {result.url}")
 
-        text = extract_content(
-            body, result.locator, format_name=result.format_name,
-        )
+        try:
+            text = extract_content(
+                body, result.locator, format_name=result.format_name,
+                strict=True,
+            )
+        except SectionNotFound as e:
+            # The document arrived; it just has no such section. That is a
+            # finding about the citation, and a different one from a document
+            # that came back empty — which is the only thing it could say before.
+            return TextOutcome("", "no_section", e.message)
+
         return TextOutcome(truncate(text, max_chars))
 
     if isinstance(result, RepoResult):

@@ -227,8 +227,130 @@ def _find_matching_child(node: SectionNode, part: SectionPart) -> SectionNode | 
 
 # ── Extraction ────────────────────────────────────────────────────────
 
-def extract_by_selector(root: SectionNode, selector: str) -> str:
-    """Walk the section tree and extract text matching a sourceSection selector."""
+#: How many candidate sections to offer. Enough to recognize the one you meant,
+#: few enough to read.
+MAX_CANDIDATES = 6
+
+
+class SectionNotFound(LookupError):
+    """The document has no such section.
+
+    A section that is not there used to extract the empty string, which the
+    report could only describe as ``empty extraction (0 chars)`` — the same
+    thing it says about a document that really is empty, and about one that
+    failed to download. A typo'd section number and a dead source read
+    identically.
+
+    ``candidates`` are sections that **do** exist in the document, so the
+    message can say what you might have meant. They are never invented: a
+    suggestion is a claim about the source, and suggesting a section the
+    document does not have would be the same lie in new clothes.
+    """
+
+    def __init__(self, selector: str, candidates: list[str] | None = None,
+                 available: int = 0, detail: str = "") -> None:
+        self.selector = selector
+        self.candidates = candidates or []
+        self.available = available
+        self.detail = detail
+        super().__init__(self.message)
+
+    @property
+    def message(self) -> str:
+        if self.detail:
+            return self.detail
+        head = f'no section matches "{self.selector}"'
+        if self.candidates:
+            return f"{head}; did you mean {', '.join(self.candidates)}?"
+        if self.available:
+            return f"{head}; the document has {self.available} sections, none like it"
+        return f"{head}; the document has no sections at all"
+
+
+def section_labels(node: SectionNode) -> list[str]:
+    """Every selector label in this subtree, in document order.
+
+    Rendered through ``_section_label``, so each one can be pasted straight
+    back into ``section:`` — a suggestion you cannot use is barely a suggestion.
+    """
+    out: list[str] = []
+    for child in node.children:
+        label = _section_label(child)
+        if label:
+            out.append(label)
+        out.extend(section_labels(child))
+    return out
+
+
+def _dotted(label: str) -> tuple[int, ...] | None:
+    """"§ 7.2" -> (7, 2). Anything not a dotted number -> None."""
+    text = label[1:].strip() if label.startswith("§") else label
+    if not re.fullmatch(r"\d+(\.\d+)*", text.strip()):
+        return None
+    return tuple(int(n) for n in text.strip().split("."))
+
+
+def _shared_prefix(a: tuple[int, ...], b: tuple[int, ...]) -> int:
+    """How many leading components two section numbers agree on."""
+    count = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        count += 1
+    return count
+
+
+def _candidates_for(node: SectionNode, part: SectionPart) -> tuple[list[str], int]:
+    """Sections under ``node`` that come closest to the part that missed.
+
+    Numbered sections are ranked by *where they live*, not by how their text
+    looks. String similarity answers "§ 1.5" with "§ 19.5" — which shares a lot
+    of characters and no meaning at all. The section you actually meant is
+    almost always a sibling, so a shared dotted prefix outranks everything, and
+    similarity only breaks the ties.
+    """
+    from difflib import SequenceMatcher, get_close_matches
+
+    from apysource.diagnostics import MIN_SIMILARITY
+
+    labels = section_labels(node)
+    if not labels:
+        return [], 0
+
+    if part.kind != "numbered":
+        return get_close_matches(part.value, labels, n=MAX_CANDIDATES,
+                                 cutoff=MIN_SIMILARITY), len(labels)
+
+    query = f"§ {part.value}"
+    wanted = _dotted(query)
+    if wanted is None:
+        return get_close_matches(query, labels, n=MAX_CANDIDATES,
+                                 cutoff=MIN_SIMILARITY), len(labels)
+
+    scored: list[tuple[int, float, str]] = []
+    for label in labels:
+        number = _dotted(label)
+        if number is None:
+            continue
+        shared = _shared_prefix(wanted, number)
+        ratio = SequenceMatcher(None, query, label).ratio()
+        # A sibling always qualifies; a stranger has to look like the target.
+        if shared or ratio >= MIN_SIMILARITY:
+            scored.append((shared, ratio, label))
+
+    scored.sort(key=lambda s: (s[0], s[1]), reverse=True)
+    return [label for _, _, label in scored[:MAX_CANDIDATES]], len(labels)
+
+
+def extract_by_selector(root: SectionNode, selector: str, *,
+                        strict: bool = False) -> str:
+    """Walk the section tree and extract text matching a sourceSection selector.
+
+    ``strict`` raises SectionNotFound instead of returning "" when nothing
+    matches. It is off by default because ``simplify_selector`` uses this to
+    *probe* candidate selectors, and relies on "" meaning "that one found
+    nothing" — the verification path opts in, the search path does not.
+    """
     parts = parse_selector(selector)
     if not parts:
         return root.all_text()
@@ -238,27 +360,46 @@ def extract_by_selector(root: SectionNode, selector: str) -> str:
     for part in parts:
         if part.kind == "paragraph":
             # Return the Nth non-empty paragraph from the current section
+            non_empty = [p for p in current.paragraphs if p.strip()]
             if part.ordinal is not None:
-                non_empty = [p for p in current.paragraphs if p.strip()]
                 idx = part.ordinal - 1
                 if 0 <= idx < len(non_empty):
                     return non_empty[idx]
+            if strict:
+                where = _section_label(current) or "the document"
+                raise SectionNotFound(
+                    selector,
+                    detail=f'no {part.value} in {where}; it has '
+                           f'{len(non_empty)} paragraphs',
+                )
             return ""
 
         child = _find_matching_child(current, part)
         if child is None:
+            if strict:
+                candidates, available = _candidates_for(current, part)
+                raise SectionNotFound(selector, candidates, available)
             return ""
         current = child
 
     return current.all_text()
 
 
-def extract_section(body: str, selector: str, fmt) -> str:
+def extract_section(body: str, selector: str, fmt, *,
+                    strict: bool = False) -> str:
     """High-level: build section tree from body, extract by selector."""
     if not hasattr(fmt, "sections"):
+        if strict:
+            # Plain text has no headings to target. Saying "empty extraction"
+            # blamed the selector for a document that never had sections.
+            raise SectionNotFound(
+                selector,
+                detail=f'cannot target "{selector}": this document has no '
+                       f"section structure ({fmt.name}); use a line range",
+            )
         return ""
     root = fmt.sections(body)
-    return extract_by_selector(root, selector)
+    return extract_by_selector(root, selector, strict=strict)
 
 
 # ── Location (generate selector from snippet) ────────────────────────

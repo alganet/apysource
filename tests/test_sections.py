@@ -4,6 +4,8 @@
 
 """Tests for apysource.sections — human-readable section selectors."""
 
+import pytest
+
 from apysource.formats import (
     HtmlFormat,
     MarkdownFormat,
@@ -15,9 +17,11 @@ from apysource.formats import (
 )
 from apysource.sections import (
     SectionNode,
+    SectionNotFound,
     SectionPart,
     extract_by_selector,
     extract_section,
+    section_labels,
     generate_selector,
     int_to_roman,
     locate_section,
@@ -834,3 +838,122 @@ def test_locate_headings_only_no_text():
 def test_extract_section_format_without_sections_method():
     """PlainTextFormat has no sections() → returns empty string."""
     assert extract_section("some text", "paragraph 1", PlainTextFormat()) == ""
+
+
+# ── A section that is not there (A2) ─────────────────────────────────────
+#
+# A section miss used to extract "", which the report could only call
+# "empty extraction (0 chars)" — the same words it used for a document that was
+# genuinely empty, and for one that failed to download. A typo'd section number
+# and a dead source read identically.
+
+def _rfc_tree():
+    return SectionNode(title="", level=0, children=[
+        SectionNode(title="7. Routing", level=1, children=[
+            SectionNode(title="7.1. Determining the Target", level=2,
+                        paragraphs=["Target text."]),
+            SectionNode(title="7.2. Host and :authority", level=2,
+                        paragraphs=["Host text."]),
+        ]),
+        SectionNode(title="9. Methods", level=1, paragraphs=["Methods text."]),
+    ])
+
+
+def test_a_missing_section_is_still_silent_by_default():
+    """simplify_selector probes with this, and reads "" as "that one missed".
+
+    Raising here would break locate. The verification path opts in instead.
+    """
+    assert extract_by_selector(_rfc_tree(), "§ 99.9") == ""
+
+
+def test_a_missing_section_says_so_when_strict():
+    with pytest.raises(SectionNotFound) as caught:
+        extract_by_selector(_rfc_tree(), "§ 99.9", strict=True)
+    assert 'no section matches "§ 99.9"' in caught.value.message
+
+
+def test_a_suggested_section_actually_exists():
+    """The adversarial one.
+
+    A suggestion is a claim about the source. Offering a section the document
+    does not have is the same lie the tool exists to catch, wearing a helpful
+    face. Every candidate must come out of the tree.
+    """
+    root = _rfc_tree()
+    real = set(section_labels(root))
+
+    with pytest.raises(SectionNotFound) as caught:
+        extract_by_selector(root, "§ 7.3", strict=True)
+
+    assert caught.value.candidates                      # it did suggest something
+    for candidate in caught.value.candidates:
+        assert candidate in real
+
+
+def test_a_near_miss_suggests_the_section_you_meant():
+    with pytest.raises(SectionNotFound) as caught:
+        extract_by_selector(_rfc_tree(), "§ 7.3", strict=True)
+    assert "§ 7.2" in caught.value.candidates
+
+
+def test_a_wild_miss_suggests_nothing_but_says_what_exists():
+    """Better to admit there is nothing close than to reach for a bad guess."""
+    with pytest.raises(SectionNotFound) as caught:
+        extract_by_selector(_rfc_tree(), "Bibliography", strict=True)
+    assert caught.value.candidates == []
+    assert "none like it" in caught.value.message
+    assert str(caught.value.available) in caught.value.message
+
+
+def test_a_document_with_no_sections_says_that_instead():
+    with pytest.raises(SectionNotFound) as caught:
+        extract_by_selector(SectionNode(), "§ 1", strict=True)
+    assert "no sections at all" in caught.value.message
+
+
+def test_a_paragraph_that_is_not_there_says_how_many_there_are():
+    root = SectionNode(title="", level=0, children=[
+        SectionNode(title="Intro", level=1, paragraphs=["One.", "Two."]),
+    ])
+    with pytest.raises(SectionNotFound) as caught:
+        extract_by_selector(root, "Intro, paragraph 7", strict=True)
+    assert "2 paragraphs" in caught.value.message
+
+
+def test_section_labels_are_paste_able_back_into_a_selector():
+    """A suggestion you cannot use is barely a suggestion."""
+    root = _rfc_tree()
+    for label in section_labels(root):
+        assert extract_by_selector(root, label) != ""
+
+
+def test_candidates_come_from_where_the_walk_failed():
+    """"§ 7, Nonexistent" should offer what is under § 7, not the whole document."""
+    with pytest.raises(SectionNotFound) as caught:
+        extract_by_selector(_rfc_tree(), "§ 7, Appendix", strict=True)
+    assert caught.value.available == 2   # 7.1 and 7.2, not all four sections
+
+
+def test_a_numbered_miss_suggests_siblings_not_lookalikes():
+    """String similarity answers "§ 1.5" with "§ 19.5" — same characters, no meaning.
+
+    The section you meant is nearly always a sibling, so a shared dotted prefix
+    has to outrank how the text happens to look.
+    """
+    root = SectionNode(title="", level=0, children=[
+        SectionNode(title="1. Intro", level=1, children=[
+            SectionNode(title="1.1. Purpose", level=2, paragraphs=["a"]),
+            SectionNode(title="1.4. Terminology", level=2, paragraphs=["b"]),
+        ]),
+        SectionNode(title="19. Appendices", level=1, children=[
+            SectionNode(title="19.5. Notes", level=2, paragraphs=["c"]),
+        ]),
+    ])
+    with pytest.raises(SectionNotFound) as caught:
+        extract_by_selector(root, "§ 1.5", strict=True)
+
+    top = caught.value.candidates[0]
+    assert top.startswith("§ 1.")      # a sibling, not § 19.5
+    assert caught.value.candidates.index("§ 1.4") < \
+        caught.value.candidates.index("§ 19.5")

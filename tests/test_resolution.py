@@ -5,6 +5,7 @@
 """Tests for apysource.resolution with synthetic RDF graphs."""
 
 import re
+from pathlib import Path
 
 from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS, RDF, RDFS
@@ -15,7 +16,7 @@ from apysource.repos._base import BaseRepo, RepoNotFound, RepoUnavailable
 from apysource.resolution import get_text, load_text, resolve_chain, resolve_direct
 from apysource.results import FetcherResult, RepoResult
 
-from tests.conftest import MockFetcher, build_chain_graph
+from tests.conftest import EMPTY_REGISTRY, MockFetcher, build_chain_graph
 
 
 # ── Mock repo ────────────────────────────────────────────────────────
@@ -531,3 +532,61 @@ def test_resolve_direct_routes_by_pattern_too(tmp_path):
     assert result.key == "key1"
     assert result.cache_file is None
     assert load_text(result).text == "the document, crawled"
+
+
+# ── A section that is not there (A2) ─────────────────────────────────
+
+RFC_BODY = (Path(__file__).parent / "fixtures" / "rfc2616.txt").read_text(
+    encoding="utf-8")
+
+
+def _section_outcome(section):
+    frag = URIRef("http://x/frag")
+    g = build_chain_graph(frag, URIRef("http://x/src"),
+                          "https://rfc.test/rfc2616.txt", location="")
+    target = next(g.objects(frag, OA.hasTarget))
+    sel = BNode()
+    g.add((target, OA.hasSelector, sel))
+    g.add((sel, RDF.type, SV.SectionSelector))
+    g.add((sel, RDF.value, Literal(section)))
+
+    result = resolve_chain(g, frag, EMPTY_REGISTRY,
+                           fetcher=MockFetcher(content=RFC_BODY))
+    return load_text(result)
+
+
+def test_a_real_section_still_extracts():
+    outcome = _section_outcome("§ 1.4")
+    assert outcome.status == "ok"
+    assert outcome.text.strip()
+
+
+def test_a_missing_section_is_not_an_empty_extraction():
+    """It used to be indistinguishable from a document that came back empty."""
+    outcome = _section_outcome("§ 99.9")
+    assert outcome.status == "no_section"
+    assert "no section matches" in outcome.reason
+    assert "empty extraction" not in outcome.reason
+
+
+def test_a_missing_section_names_sections_that_exist():
+    outcome = _section_outcome("§ 1.5")
+    assert "§ 1.4" in outcome.reason
+
+
+def test_a_section_selector_on_a_plain_document_says_so():
+    """Plain text has no headings to target; blaming the selector was wrong."""
+    frag = URIRef("http://x/frag")
+    g = build_chain_graph(frag, URIRef("http://x/src"),
+                          "https://plain.test/notes.txt", location="")
+    target = next(g.objects(frag, OA.hasTarget))
+    sel = BNode()
+    g.add((target, OA.hasSelector, sel))
+    g.add((sel, RDF.type, SV.SectionSelector))
+    g.add((sel, RDF.value, Literal("§ 1")))
+
+    result = resolve_chain(g, frag, EMPTY_REGISTRY,
+                           fetcher=MockFetcher(content="just some loose prose\n"))
+    outcome = load_text(result)
+    assert outcome.status == "no_section"
+    assert "no section structure" in outcome.reason

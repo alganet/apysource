@@ -24,8 +24,10 @@ from apysource.formats import (
     extract_content,
 )
 from apysource.sections import (
+    SectionNotFound,
     extract_by_selector,
     locate_section,
+    section_labels,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -317,3 +319,33 @@ def test_wiki_fixture_deep_nesting(http_wiki):
     data_exchange = tech.children[1]
     assert data_exchange.title == "Data exchange"
     assert len(data_exchange.children) >= 2  # Has sub-subsections
+
+
+def test_locate_still_works_when_a_candidate_selector_misses(rfc2616):
+    """The regression A2 could very easily have caused.
+
+    simplify_selector *probes* with extract_by_selector and reads "" as "that
+    candidate found nothing". Making the miss raise — the obvious way to do A2 —
+    turns every probe into a crash, and locate stops working at all. Hence
+    strict=False by default, and this test to keep it that way.
+    """
+    snippet = "Any party to the communication which is not acting as a tunnel"
+    result = locate_section(rfc2616, snippet, RfcTextFormat())
+
+    assert result is not None
+    assert "§ 1.4" in result.locator
+    assert snippet in extract_content(rfc2616, result.locator,
+                                      format_name="section")
+
+
+def test_a_missing_section_in_a_real_rfc_names_real_ones(rfc2616):
+    """Suggestions are claims about the source; they must be true of it."""
+    fmt = RfcTextFormat()
+    real = set(section_labels(fmt.sections(rfc2616)))
+
+    with pytest.raises(SectionNotFound) as caught:
+        extract_content(rfc2616, "§ 99.9", format_name="section", strict=True)
+
+    assert caught.value.candidates
+    for candidate in caught.value.candidates:
+        assert candidate in real

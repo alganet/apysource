@@ -93,7 +93,7 @@ class TextOutcome:
     """
 
     text: str
-    status: str = "ok"  # ok | not_found | unavailable | no_file | empty
+    status: str = "ok"  # ok | not_found | unavailable | no_file | empty | no_section
     reason: str = ""
 
 

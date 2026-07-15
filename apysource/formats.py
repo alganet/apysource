@@ -536,25 +536,52 @@ def detect_format(body: str,
     return formats[-1]
 
 
+def _explain_empty(body: str, locator: str, fmt: ContentFormat) -> None:
+    """Ask a section-capable format *why* it extracted nothing, and raise.
+
+    Only reached when the extraction already came back empty, so the cost of
+    re-walking the tree is paid exactly once, on the failure path — and only
+    there is there anything to explain.
+    """
+    if not hasattr(fmt, "sections"):
+        return
+    from apysource.sections import extract_section
+    extract_section(body, locator, fmt, strict=True)
+
+
 def extract_content(body: str, locator: str | None,
                     format_name: str | None = None,
-                    formats: list[ContentFormat] = DEFAULT_FORMATS) -> str:
-    """Extract content from body using format-specific locator."""
+                    formats: list[ContentFormat] = DEFAULT_FORMATS,
+                    *, strict: bool = False) -> str:
+    """Extract content from body using format-specific locator.
+
+    ``strict`` raises ``sections.SectionNotFound`` when a section selector
+    matches nothing, rather than returning "" — which the report could only
+    describe as an empty extraction, indistinguishable from an empty document.
+    """
     if not locator:
         return body
     if format_name == "section":
         from apysource.sections import extract_section
         fmt = detect_format(body, formats)
-        return extract_section(body, locator, fmt)
+        return extract_section(body, locator, fmt, strict=strict)
     # Line ranges (N-M) always use PlainTextFormat regardless of document type
     if re.match(r"^\d+-\d+$", locator.strip()):
         return PlainTextFormat().extract(body, locator)
     if format_name:
         found = _find_format(format_name, formats)
         if found:
-            return found.extract(body, locator)
+            text = found.extract(body, locator)
+            # Markdown/wikitext/RFC route their own extract() through the
+            # section machinery, so a section miss can arrive by this door too.
+            if strict and not text:
+                _explain_empty(body, locator, found)
+            return text
     fmt = detect_format(body, formats)
-    return fmt.extract(body, locator)
+    text = fmt.extract(body, locator)
+    if strict and not text:
+        _explain_empty(body, locator, fmt)
+    return text
 
 
 def locate_snippet(body: str, snippet: str,
