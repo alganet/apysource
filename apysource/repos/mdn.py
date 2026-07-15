@@ -250,6 +250,13 @@ class MdnRepo(BaseRepo):
     NAME = "mdn"
     supports_crawl = True
 
+    # en-US only, exactly as `url_pattern` is: translations live in
+    # mdn/translated-content, and a name that minted a /fr/docs/ URL would send
+    # MdnRepo looking in files/en-us/ for a page that is not there.
+    NAME_MATCH = r"^MDN (?P<page>.+)$"
+    CANONICAL_URL = "https://developer.mozilla.org/en-US/docs/{page}"
+    NAME_EXAMPLE = "MDN Web/HTTP/Reference/Headers/Origin"
+
     # ── Source interface ──────────────────────────────────────────────
 
     def url_to_key(self, url: str) -> str | None:

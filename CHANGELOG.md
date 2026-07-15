@@ -13,6 +13,27 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **`apysource add <name>` fetched the wrong document when an entry pinned that name to its own URL.**
+  It minted the URL from the pattern and ignored the entry, so a file pinning `RFC 9110` to
+  datatracker had its snippet located in rfc-editor's *plain text* and the resulting locator written
+  into the *HTML* entry — a targetter `check` would then apply to a document it was never measured
+  from. `add` now resolves through `complete()`, the same entry-wins rule `check` uses.
+- **`apysource add` no longer overwrites a file it cannot read.** A sources file that existed but had
+  no top-level `sources:` (a typo'd `source:`, say) was treated as empty and then replaced, costing
+  the author everything else in it. It is refused instead.
+- **A pattern template with an unbalanced or an escaped brace was mis-validated.** The load-time check
+  scanned with a regex instead of `string.Formatter`, so `https://e.org/{n}/{` passed it and then
+  raised out of `str.format` at mint time — the very deferred failure the check exists to prevent —
+  while a correctly escaped `{{lit}}` was falsely refused.
+- **An optional capture group that did not match interpolated the word `"None"` into the URL.**
+  `^RFC (?P<n>\d+)(?P<sfx>bis)?$` minted `.../rfc9110None.txt` and fetched it. A group that did not
+  participate is the empty string now.
+- **`Archive <item>` accepted a name with a slash in it and then fetched a different item.** The
+  family allowed `.+` while `url_pattern` stops the key at the first `/`, so `Archive foo/bar` was
+  claimed, keyed as `foo`, and verified against the wrong document with nothing to say so.
+- **`SourceSet.entries` no longer aliases the data it was given.** `complete()` returned the caller's
+  own dict when the entry already had a URL and a fresh one when it minted — two ownership rules for
+  one return type, so a consumer editing a resolved entry silently edited the document it had read.
 - **A section selector now names the section the passage is actually in.** `locate` looked for
   *the shortest selector that extracts text containing the snippet* — and that objective quietly
   guarantees the wrong answer, because a section always contains its subsections' text and always
@@ -83,6 +104,48 @@ All notable changes to this project are documented here. The format is based on
   path, so a project directory containing those words no longer hides every `.ttl` file.
 
 ### Added
+- **A source can be named instead of addressed.** A new top-level `patterns` key maps a name
+  like `RFC 9110` to the URL it denotes, so a source entry may now carry a `label` and no `url`.
+  Your patterns are tried before the shipped ones, an entry with a `url` beats both, and within
+  an entry every key you write wins over the template — name the family for the URL, then say the
+  `title` or the `part_of` the family cannot know.
+
+  This lives here, and not in a citation generator, for one reason: apysource already owns every
+  link in the chain from a URL onward — repo claiming, fetching, caching, format detection, section
+  trees, redirect surfacing — and name→URL was the missing *first* link. A generator that minted
+  rfc-editor URLs itself was claiming to know what an RFC is, and it does not.
+
+  A pattern is not a repo. They are inverse directions: `url_pattern` *parses* a URL, a pattern's
+  `match` *generates* one, and a pattern's output is a repo's input. A pattern is pure data with no
+  fetch, no cache, and no 404-vs-outage; it cannot be folded into a repo, because `url_to_key` is
+  deliberately non-injective and has no inverse.
+
+  A `{field}` a pattern's regex never captures is refused at load, not at the 404 six weeks later.
+- **Six families ship, and five of them are declared by their repos.** `RFC NNNN` belongs to
+  `patterns.py` precisely *because* no repo claims rfc-editor — that gap is what patterns exist for.
+  `MDN <page>`, `Gutenberg <id>`, `Wikisource <page>`, `Wiktionary <word>` and `Archive <item>` are
+  declared by the repo that fetches them, via `BaseRepo.NAME_MATCH` / `CANONICAL_URL`, because how
+  you name an MDN page is MDN's knowledge. A third-party `BaseRepo` subclass gets naming by
+  declaring two strings, and a named repo source is claimed by its repo exactly as a written URL is.
+
+  A family states its host twice — once as a template that builds a URL, once as the matcher that
+  claims one — and that cannot be deduplicated: the matchers carry knowledge a template cannot
+  express (`(?i:en-US)` accepts `en-us` while excluding `/fr/docs/`; Gutenberg's `(\d+)` admits only
+  an ebook number, and matches without the `www.` its canonical URL carries). The two halves are
+  bound by a round-trip test instead: mint each family's example, and the repo that declared it must
+  claim and key what came out.
+- **`apysource add` takes a name where it takes a URL.** `apysource add sources.yaml "RFC 9110"
+  "<snippet>"` resolves the name through the same patterns `check` will use on the file it is
+  writing, so the two cannot disagree. The entry it writes carries only the name: writing the
+  resolved URL back would defeat the point of naming a family.
+- **`apysource.load_sources`** returns the sources file as data with names resolved — entries with
+  their URLs filled in, plus `resolve(name)` for a name that appears in no entry at all. This is the
+  seam a citation generator needs; `graph_from_data` answers "what does this file mean" and a graph
+  is the wrong shape for a tool that has to *write* one. `resolve` returns `None` rather than
+  raising, because the caller is the one holding the file and line the name came from.
+- **`apysource` exports its public API.** `from apysource import check_graph, graph_from_data` is
+  what the README has always said and what `__init__.py` never did — it defined `__version__` and
+  nothing else, so the documented import raised `ImportError`.
 - **The `#section-7.2` in a citation's URL is now read as targeting.** It always was
   targeting — the author wrote down where in the document they were looking — and nothing
   read it: `rfc9110.html#section-7.2` was verified against the whole of RFC 9110, all 502,907
@@ -171,6 +234,19 @@ All notable changes to this project are documented here. The format is based on
 - `ruff` linting/formatting, wired into `make lint`/`make format` and the `make check` gate.
 
 ### Changed
+- **An unknown top-level key in a sources file is now refused.** It was silently ignored. With
+  `patterns:` meaning something, a typo'd `pattern:` would mint nothing and leave every url-less
+  source below it failing with a message about entirely the wrong thing. Only `sources` and
+  `patterns` are known.
+- **`graph_from_data` takes the patterns to mint with as an argument**, defaulting to the file's own
+  plus the shipped ones. A caller that has already compiled them (`load_sources` has) passes them in
+  rather than making the loader compile every regex in the file a second time.
+- **The sources vocabulary moved to `apysource.schema`** — `SOURCE_KEYS`, `FRAGMENT_KEYS`,
+  `TARGETTING_KEYS` and the two refusals. `yaml_input` re-exports them, so nothing that imported them
+  from there has to change. They moved because `patterns` needs them too, and that made a cycle
+  survivable only by hiding an import inside a function body. An import you have to hide is telling
+  you the dependency is on the wrong thing: neither module wanted the *other*, both wanted the
+  vocabulary, and the vocabulary depends on nobody.
 - **`add` labels a source by its title, not by its first heading.** It called every RFC it ever
   saw `1. Introduction`, because it asked the format for its first *section heading* — and for an
   RFC that is always § 1. An RFC states its title in its header block, an HTML page in `<title>`,

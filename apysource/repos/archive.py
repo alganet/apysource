@@ -27,6 +27,15 @@ class ArchiveRepo(BaseRepo):
     NAME = "archive"
     supports_crawl = True
 
+    # `[^/?#\s]+` and not `.+`, to say exactly what `url_pattern` says. An item id
+    # has no slash in it, and `url_pattern`'s `(.+?)(?:/|$|\?|#)` stops at the
+    # first one — so `Archive foo/bar` minted a url this repo cheerfully claimed
+    # and then keyed as `foo`, verifying the citation against a different item with
+    # nothing to say it had happened. A name outside the family is refused instead.
+    NAME_MATCH = r"^Archive (?P<item>[^/?#\s]+)$"
+    CANONICAL_URL = "https://archive.org/details/{item}"
+    NAME_EXAMPLE = "Archive onthemoralsofplut00plut"
+
     # ── Source interface ──────────────────────────────────────────────
 
     def url_to_key(self, url: str) -> str | None:

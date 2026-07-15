@@ -38,6 +38,10 @@ class WikisourceRepo(BaseRepo):
     NAME = "wikisource"
     supports_crawl = True
 
+    NAME_MATCH = r"^Wikisource (?P<page>.+)$"
+    CANONICAL_URL = "https://en.wikisource.org/wiki/{page}"
+    NAME_EXAMPLE = "Wikisource On_the_Origin_of_Species"
+
     # ── Source interface ──────────────────────────────────────────────
 
     def url_to_key(self, url: str) -> str | None:

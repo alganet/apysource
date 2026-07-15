@@ -131,13 +131,14 @@ If no targetter is given, apysource checks the full page text for your snippet.
 ## YAML schema
 
 Each YAML file has a top-level `sources` list. Each source has nested `fragments`.
+An optional top-level `patterns` list says how to turn a *name* into a source.
 
 ### Source properties
 
 | Key         | What it does                                                                                                                                  |
 |-------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
 | `label`     | Name of the source (required)                                                                                                                 |
-| `url`       | URL to fetch (required)                                                                                                                       |
+| `url`       | URL to fetch — required, unless a `patterns` entry mints one from the label                                                                   |
 | `type`      | IANA media type: `text/html`, `text/plain`, `text/markdown`, etc. Short names (`html`, `plain-text`) also accepted. Auto-detected if omitted. |
 | `language`  | Language code, RFC 5646 (metadata)                                                                                                            |
 | `title`     | Document title (metadata)                                                                                                                     |
@@ -162,6 +163,69 @@ Each YAML file has a top-level `sources` list. Each source has nested `fragments
 | `page_start` | Starting page number (for print sources)                     |
 | `page_end`   | Ending page number (for print sources)                       |
 | `cited_by`   | Where this claim is made — see below                         |
+
+### Patterns: a name instead of a URL
+
+Writing 350 entries for RFC 1..9999 by hand is silly. A pattern names a *uniform
+family* — a URL shape and a media type — and every member of it resolves without
+an entry of its own:
+
+```yaml
+sources:
+  - label: RFC 9110        # no url: a pattern mints it
+    fragments:
+      - label: host_header
+        section: "7.2"
+        snippet: "A user agent MUST generate a Host header field"
+
+  - label: MDN Web/HTTP/Reference/Headers/Origin
+  - label: Gutenberg 2701
+```
+
+Six families ship: `RFC NNNN`, and one for each repo — `MDN <page>`,
+`Gutenberg <id>`, `Wikisource <page>`, `Wiktionary <word>`, `Archive <item>`. A
+family of your own is three lines, and it is not a release of this package:
+
+```yaml
+patterns:
+  - match: '^W3C (?P<slug>[a-z0-9-]+)$'
+    source: {url: "https://www.w3.org/TR/{slug}/", type: text/html}
+```
+
+Your patterns are tried before the shipped ones, and an entry with a `url` beats
+both — so pinning `RFC 9110` to datatracker is one entry. Within an entry, every
+key you write wins over the template: name the family for the URL, then say the
+`title` or the `part_of` the family cannot know.
+
+A `{field}` the regex never captures is refused at load, not at the 404 six weeks
+later.
+
+Patterns are for uniform families. A book needs an ISBN, a publisher, an edition;
+a chapter needs a `part_of`. Those have biographies, and a biography goes in an
+entry.
+
+#### A pattern is not a repo
+
+They are inverse directions, and they compose:
+
+```
+name --[pattern]--> canonical URL --[repo]--> cached document
+     ^ generates a url             ^ parses one
+```
+
+A pattern's output is a repo's input. A pattern is pure data — one string
+substitution, no fetch, no cache, no 404-vs-outage. A repo is the machinery behind
+the URL: crawling, caching, and for MDN a rewrite to the authored Markdown in
+`mdn/content` with the KumaScript macros rendered.
+
+So they sit on opposite sides of the URL, and neither replaces the other. `RFC` is
+declared by apysource itself precisely *because* no repo claims rfc-editor — that
+gap is what patterns are for. Every other family is declared by the repo that
+fetches it, because how you name an MDN page is MDN's business. Name one, and it is
+claimed by its repo exactly as a URL you typed would be.
+
+Adding a repo is a Python class and a release. Adding a pattern is three lines of
+your own YAML.
 
 ### Who cites it
 
@@ -215,6 +279,20 @@ raise SystemExit(1 if failed(results) else 0)
 *means* is the caller's decision. `json_report` is there too, and it is the
 same one `--format json` uses.
 
+A generator that *writes* a sources file needs the other direction — the entries
+back as data, and an answer for a name that appears in no entry at all:
+
+```python
+from apysource import load_sources
+
+sources = load_sources(path)          # or None: the shipped patterns still resolve
+sources.entries["RFC 9110"]["url"]    # entries come back with their url filled in
+sources.resolve("RFC 9112")           # a name nobody wrote an entry for — or None
+```
+
+`resolve` returns `None` rather than raising. You are the one holding the file and
+the line the name came from, so the refusal is yours to write.
+
 ## CLI
 
 ```bash
@@ -225,7 +303,7 @@ apysource [-c config.toml] <command> [args...]
 |------------------------------------------------|---------------------------------------------------------------|
 | `check [sources.yaml] [--provenance file.ttl]` | Fetch, extract, and verify all snippets                       |
 | `locate <url> <snippet>`                       | Find a snippet in a page, show the targetter                  |
-| `add <file> <url> <snippet>`                   | Locate a snippet and add it to a YAML file                    |
+| `add <file> <url-or-name> <snippet>`           | Locate a snippet and add it to a YAML file                    |
 | `validate`                                     | Check that `.ttl` files parse correctly (with optional SHACL) |
 
 Without `-c`, apysource uses built-in defaults (all built-in repos enabled). Pass `-c config.toml` to customize repos and HTTP settings (requires `pip install apysource[dev]`).

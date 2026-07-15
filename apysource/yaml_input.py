@@ -5,17 +5,40 @@
 """Load source definitions from YAML files into an rdflib Graph.
 
 Pure function — no config imports, no global state.
+
+``graph_from_data`` takes the patterns it should mint url-less sources with as an
+argument, defaulting to the file's own plus the shipped ones. It is a parameter
+and not a lookup so that this stays a function of its inputs: a caller that has
+already compiled the patterns (``sources.load_sources`` has) passes them in rather
+than making this module compile them a second time.
 """
 
+from __future__ import annotations
+
 import re
+from collections.abc import Sequence
 from pathlib import Path
 
 import yaml
 from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS, PROV, RDF, RDFS
 
-from apysource.formats import normalize_mime_type
-from apysource.namespaces import BIBO, OA, SCHEMA, SV, new_graph
+from apysource.namespaces import OA, SV, new_graph
+from apysource.patterns import SourcePattern, complete, patterns_from_data
+from apysource.schema import (  # noqa: F401 — the vocabulary lives here now
+    _CITE_SITE_ALLOWED,
+    _FRAGMENT_ALLOWED,
+    _FRAGMENT_KEYS,
+    _NORMALIZE_KEYS,
+    _SOURCE_ALLOWED,
+    _SOURCE_KEYS,
+    _TOP_ALLOWED,
+    FRAGMENT_KEYS,
+    SOURCE_KEYS,
+    TARGETTING_KEYS,
+    reject_unknown_keys,
+    text,
+)
 
 
 def _slugify(text: str) -> str:
@@ -80,88 +103,12 @@ class _Minter:
         return uri
 
 
-# YAML key → RDF predicate for source-level properties
-_SOURCE_KEYS = {
-    "url": SCHEMA.url,
-    "type": DCTERMS.format,
-    "language": DCTERMS.language,
-    "title": DCTERMS.title,
-    "date": DCTERMS.issued,
-    "license": DCTERMS.license,
-    "isbn": BIBO.isbn,
-    "doi": BIBO.doi,
-    "publisher": DCTERMS.publisher,
-    "edition": SV.edition,
-}
-
-# Keys that need special value normalization
-_NORMALIZE_KEYS = {
-    "type": normalize_mime_type,
-}
-
-# YAML key → RDF predicate for fragment-level properties
-# (snippet, selector, section are handled by OA emission, not stored as flat sv: properties)
-_FRAGMENT_KEYS = {
-    "lines": SV.sourceLines,
-    "location": SV.sourceLocation,
-    "page_start": BIBO.pageStart,
-    "page_end": BIBO.pageEnd,
-}
-
-_SOURCE_ALLOWED = set(_SOURCE_KEYS) | {"label", "part_of", "fragments"}
-_FRAGMENT_ALLOWED = (set(_FRAGMENT_KEYS)
-                     | {"label", "snippet", "selector", "section", "cited_by"})
-
-# Keys of one entry of a fragment's ``cited_by`` list.
-_CITE_SITE_ALLOWED = {"file", "line"}
-
-#: What a source may say, and what a fragment may say — as data, on purpose.
-#:
-#: A tool that *generates* citations has to know what it is allowed to emit, and
-#: the honest way to tell it is to say so. The alternative is that it reads the
-#: private name, or keeps its own copy — and a second copy of this list is how a
-#: generator ends up emitting a key this loader silently stopped accepting.
-SOURCE_KEYS = frozenset(_SOURCE_ALLOWED)
-FRAGMENT_KEYS = frozenset(_FRAGMENT_ALLOWED)
-
-#: The fragment keys that *select a passage*: everything a citation can say about
-#: where in the source its quote lives. `label` names the citation, `snippet` is
-#: the quote itself, and `cited_by` is the citing side — none of them target.
-TARGETTING_KEYS = FRAGMENT_KEYS - {"label", "snippet", "cited_by"}
-
-
-def _reject_unknown_keys(entry: dict, allowed: set[str], what: str) -> None:
-    """A key we do not know is a key we silently ignore.
-
-    ``snipet:`` loaded without a murmur, and the citation went on to verify
-    nothing at all. The author wrote the quote down; the tool threw it away and
-    called the run a pass.
-    """
-    unknown = sorted(k for k in entry if k not in allowed)
-    if unknown:
-        raise ValueError(
-            f"{what}: unknown key{'s' if len(unknown) > 1 else ''} "
-            f"{', '.join(repr(k) for k in unknown)}. "
-            f"Known keys are: {', '.join(sorted(allowed))}. "
-            f"A key apysource does not recognise is a key it ignores, and a "
-            f"citation whose snippet was dropped verifies nothing.",
-        )
-
-
-def _text(value: object, what: str) -> str:
-    """A scalar YAML value, as text — or a clear refusal.
-
-    ``str()`` was applied to whatever turned up, so a ``snippet:`` written as a
-    YAML *list* was stored as its Python repr — ``"['line one', 'line two']"`` —
-    and the citation could then never match, however faithfully it was quoted.
-    """
-    if isinstance(value, (str, int, float, bool)):
-        return str(value)
-    raise ValueError(
-        f"{what} must be a single piece of text, not a "
-        f"{type(value).__name__}. Written as a list or a mapping it would be "
-        f"stored as its Python repr and could never match the source.",
-    )
+# The vocabulary and the two refusals now live in `schema`, which depends on
+# nobody — see that module for why. Re-exported here because this is where a
+# caller has always found them, and `SOURCE_KEYS` exists precisely so that a
+# generator does not keep its own copy.
+_reject_unknown_keys = reject_unknown_keys
+_text = text
 
 
 def _emit_oa_target(g: Graph, frag_uri: URIRef, source_uri: URIRef,
@@ -279,11 +226,12 @@ def load_yaml(path: Path) -> Graph:
     The YAML file should contain a top-level ``sources`` list.
     Each source may have a nested ``fragments`` list.
     """
-    text = Path(path).read_text(encoding="utf-8")
-    return graph_from_data(yaml.safe_load(text), origin=str(path))
+    body = Path(path).read_text(encoding="utf-8")
+    return graph_from_data(yaml.safe_load(body), origin=str(path))
 
 
-def graph_from_data(data: object, origin: str = "<data>") -> Graph:
+def graph_from_data(data: object, origin: str = "<data>",
+                    patterns: Sequence[SourcePattern] | None = None) -> Graph:
     """Mint a graph from already-parsed sources data.
 
     The same loader ``load_yaml`` runs, minus the reading — so a caller that
@@ -291,10 +239,17 @@ def graph_from_data(data: object, origin: str = "<data>") -> Graph:
     identical validation without writing a file first. ``origin`` names the
     data in error messages; it is the path when there is one.
 
+    ``patterns`` defaults to the file's own plus the shipped ones. Pass them when
+    you have already compiled them, so they are not compiled twice.
+
     There is one definition of what a sources file means, and this is it.
     """
     if not isinstance(data, dict) or "sources" not in data:
         raise ValueError(f"YAML file must contain a top-level 'sources' list: {origin}")
+
+    reject_unknown_keys(data, _TOP_ALLOWED, origin)
+    if patterns is None:
+        patterns = patterns_from_data(data, origin)
 
     g = new_graph()
     minter = _Minter()
@@ -313,9 +268,18 @@ def graph_from_data(data: object, origin: str = "<data>") -> Graph:
         what_source = f"source {label!r}"
         _reject_unknown_keys(source_def, _SOURCE_ALLOWED, what_source)
 
-        url = source_def.get("url")
-        if not url:
-            raise ValueError(f"Source '{label}' must have a 'url'")
+        # A name is enough, when a pattern knows the family it belongs to. This is
+        # a local rebind, never a mutation: `data` is the caller's, and a generator
+        # walks it again after this loader has accepted it.
+        completed = complete(source_def, patterns)
+        if completed is None:
+            tried = ", ".join(repr(p.pattern.pattern) for p in patterns)
+            raise ValueError(
+                f"{what_source}: must have a 'url', and no pattern mints one from "
+                f"its label. Give it a 'url', or a top-level 'patterns' entry whose "
+                f"'match' claims {label!r}. Tried: {tried}. ({origin})",
+            )
+        source_def = completed
 
         source_uri = sources_by_label[label]
 

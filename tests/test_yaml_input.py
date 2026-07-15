@@ -419,3 +419,123 @@ sources:
 """)
     with pytest.raises(ValueError, match="not a source in this file"):
         load_yaml(path)
+
+
+# ── A name is enough, when a pattern knows the family ────────────────────
+
+RFC_URL = "https://www.rfc-editor.org/rfc/rfc9110.txt"
+
+
+def _one(g, predicate):
+    """The single object of this predicate in the graph."""
+    return str(next(iter(g.objects(None, predicate))))
+
+
+def test_a_url_less_source_gets_one_from_the_shipped_pattern(tmp_path):
+    """`url` stops being required — but only because something else supplies it.
+    A source apysource cannot fetch is still refused; it just has one more way of
+    learning where to fetch from."""
+    g = load_yaml(_write(tmp_path, """
+sources:
+  - label: "RFC 9110"
+    fragments:
+      - label: "f"
+        snippet: "a quote long enough to be taken seriously"
+"""))
+    assert _one(g, SCHEMA.url) == RFC_URL
+    assert _one(g, DCTERMS.format) == "text/plain"
+
+
+def test_a_named_source_and_a_written_one_mean_the_same_thing(tmp_path):
+    """The minted url is written by the ordinary loader, so nothing downstream —
+    repo claiming, format detection, verification — can tell the two apart."""
+    named = load_yaml(_write(tmp_path, """
+sources:
+  - label: "RFC 9110"
+    fragments:
+      - label: "f"
+        snippet: "a quote long enough to be taken seriously"
+"""))
+    written = load_yaml(_write(tmp_path, f"""
+sources:
+  - label: "RFC 9110"
+    url: "{RFC_URL}"
+    type: text/plain
+    fragments:
+      - label: "f"
+        snippet: "a quote long enough to be taken seriously"
+"""))
+    assert named.isomorphic(written)
+
+
+def test_the_file_beats_the_shipped_pattern(tmp_path):
+    g = load_yaml(_write(tmp_path, """
+patterns:
+  - match: '^RFC (?P<n>\\d+)$'
+    source:
+      url: "https://datatracker.ietf.org/doc/html/rfc{n}"
+      type: text/html
+sources:
+  - label: "RFC 9110"
+    fragments:
+      - label: "f"
+        snippet: "a quote long enough to be taken seriously"
+"""))
+    assert _one(g, SCHEMA.url) == "https://datatracker.ietf.org/doc/html/rfc9110"
+
+
+def test_an_entry_key_beats_the_pattern_that_minted_the_url(tmp_path):
+    """Name the family, then say the one thing the family cannot know."""
+    g = load_yaml(_write(tmp_path, """
+sources:
+  - label: "RFC 9110"
+    title: "HTTP Semantics"
+    type: text/html
+    fragments:
+      - label: "f"
+        snippet: "a quote long enough to be taken seriously"
+"""))
+    assert _one(g, SCHEMA.url) == RFC_URL          # the pattern's
+    assert _one(g, DCTERMS.format) == "text/html"  # the entry's
+    assert _one(g, DCTERMS.title) == "HTTP Semantics"
+
+
+def test_a_name_no_pattern_claims_names_the_patterns_it_tried(tmp_path):
+    with pytest.raises(ValueError, match=r"no pattern mints one.*Tried:.*RFC"):
+        load_yaml(_write(tmp_path, """
+sources:
+  - label: "Fetch"
+    fragments:
+      - label: "f"
+        snippet: "a quote long enough to be taken seriously"
+"""))
+
+
+def test_two_url_less_labels_that_mint_one_urn_are_still_refused(tmp_path):
+    """Identity is minted from the label, before any url is looked at. Naming a
+    family changes nothing about that: two citations that cannot be told apart
+    are refused however their url arrived."""
+    with pytest.raises(ValueError, match="identity collision"):
+        load_yaml(_write(tmp_path, """
+patterns:
+  - match: '^rfc[- ](?P<n>\\d+)$'
+    source: {url: "https://example.com/rfc{n}"}
+  - match: '^RFC (?P<n>\\d+)$'
+    source: {url: "https://example.com/rfc{n}"}
+sources:
+  - label: "RFC 9110"
+  - label: "rfc-9110"
+"""))
+
+
+def test_a_top_level_key_nobody_knows_is_refused(tmp_path):
+    """A typo'd `pattern:` would mint nothing, and every url-less source below it
+    would then fail with a message about entirely the wrong thing."""
+    with pytest.raises(ValueError, match="unknown key 'pattern'"):
+        load_yaml(_write(tmp_path, """
+pattern:
+  - match: '^RFC (?P<n>\\d+)$'
+    source: {url: "https://example.com/rfc{n}"}
+sources:
+  - label: "RFC 9110"
+"""))

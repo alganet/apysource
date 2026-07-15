@@ -43,8 +43,42 @@ from apysource.repos import BaseRepo, RepoRegistry
 from apysource.graph import load_triples
 from apysource.http import CachedFetcher
 from apysource.yaml_input import load_yaml, graph_from_data
+from apysource.sources import load_sources, sources_from_data
+from apysource.patterns import mint_source, patterns_from_data, SourcePattern
 from apysource.formats import detect_format, extract_content, locate_snippet
 ```
+
+## Advanced: writing a sources file, not just checking one
+
+A generator has the opposite problem from a checker. `graph_from_data` answers
+*what does this file mean*, and a graph is the wrong shape for a tool that has to
+**write** one: it has to emit entries, not triples, and it has to answer for names
+its input file never mentioned.
+
+```python
+from apysource import load_sources
+
+sources = load_sources(path)            # `None` is fine — the shipped patterns remain
+sources.entries["RFC 9110"]["url"]      # entries come back with their url filled in
+sources.resolve("RFC 9112")             # a name in no entry at all — minted, or None
+```
+
+Two properties are worth relying on.
+
+**Entries come back URL-complete.** An entry written as a bare `label:` is merged
+with whatever its pattern minted, *at load*. So a generator can emit the entries
+it was handed straight into a file of its own, and that file stands alone — full
+URL, full media type, no `patterns:` table required to read it. A reviewer sees
+the URL that was actually fetched.
+
+**`resolve` returns `None`, it does not raise.** apysource does not know why you
+were asking. You are the one holding the comment, the file and the line the name
+was written at, and the refusal is worth reading only if it says so.
+
+Validation is not duplicated: `load_sources` runs the data through
+`graph_from_data`. There is one definition of what a sources file means, and a
+generator keeping a second copy of it is how a generator ends up emitting a key
+the loader silently stopped accepting.
 
 ## Advanced: RDF/Turtle input
 

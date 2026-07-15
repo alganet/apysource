@@ -52,6 +52,12 @@ class GutenbergRepo(BaseRepo):
     NAME = "gutenberg"
     supports_crawl = True
 
+    # `\d+` and not `.+`: a Gutenberg book is an ebook number, and a name that is
+    # not one names no book. The url_pattern says the same thing about the URL.
+    NAME_MATCH = r"^Gutenberg (?P<id>\d+)$"
+    CANONICAL_URL = "https://www.gutenberg.org/ebooks/{id}"
+    NAME_EXAMPLE = "Gutenberg 2701"
+
     #: The assembled whole-book file. Distinct from ``{id}_ch001.txt`` so it can
     #: never be mistaken for a chapter, and named so a crawl can find and delete
     #: a stale one.

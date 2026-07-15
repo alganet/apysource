@@ -53,6 +53,49 @@ class BaseRepo:
     #: of truth.
     supports_crawl: bool = False
 
+    # ── The name family, if this repo has one ─────────────────────────
+    #
+    # How you *name* an MDN page is MDN's knowledge, so it is declared here and
+    # not in ``patterns.py``, which knows nothing about MDN and should not start.
+    # Optional: a repo may claim URLs without offering any way to name them.
+    #
+    # Read the direction carefully, because it is the opposite of ``url_pattern``:
+    #
+    #     name --[NAME_MATCH]--> CANONICAL_URL --[url_pattern]--> key --[base_url]--> fetch url
+    #          ^ generates a url                ^ parses one
+    #
+    # ``CANONICAL_URL`` is **not** ``base_url``. ``base_url`` builds the *fetch*
+    # URL, which for every shipped repo is a different endpoint and usually a
+    # different host (MDN fetches from raw.githubusercontent). ``CANONICAL_URL``
+    # is the public address a human clicks and the one that goes in ``schema:url``.
+    #
+    # There is no inverse. ``url_to_key`` is deliberately non-injective — MDN
+    # case-folds and rewrites ``:``, ``*``, ``?`` — so a key cannot be turned back
+    # into a URL, and the family cannot be derived from the matcher.
+
+    #: A regex over *names*, with named groups that fill ``CANONICAL_URL``.
+    NAME_MATCH: str = ""
+
+    #: The canonical public URL a matched name denotes.
+    CANONICAL_URL: str = ""
+
+    #: A real name in this family. ``tests/test_patterns.py`` mints it and asserts
+    #: this very repo claims what came out — the two halves of a family state the
+    #: host twice by necessity, and that test is what keeps them from drifting.
+    NAME_EXAMPLE: str = ""
+
+    @classmethod
+    def family(cls) -> dict[str, Any] | None:
+        """This repo's name family, in the shape ``compile_patterns`` already eats.
+
+        Returning the raw dict rather than a ``SourcePattern`` keeps ``repos`` from
+        importing ``patterns`` — the dependency runs the other way, and it has to:
+        a pattern is data a repo happens to declare, not a thing a repo needs.
+        """
+        if not cls.NAME_MATCH or not cls.CANONICAL_URL:
+            return None
+        return {"match": cls.NAME_MATCH, "source": {"url": cls.CANONICAL_URL}}
+
     def __init__(self, cache_dir: Any = None, http_client: Any = None,
                  url_pattern: Any = None, base_url: str | None = None,
                  crawl_delay: float | None = None) -> None:

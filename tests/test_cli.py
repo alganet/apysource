@@ -138,6 +138,124 @@ def test_add_appends_to_existing(tmp_path, capsys):
     assert len(data["sources"][0]["fragments"]) == 1
 
 
+def test_add_takes_a_name_and_writes_only_the_name(tmp_path, capsys):
+    """`apysource add sources.yaml "RFC 9110" "..."` — no rfc-editor url to paste.
+
+    And the entry it writes carries *only* the name. Writing the resolved url back
+    would defeat the point of naming a family: the file would stop being about
+    RFC 9110 and start being about one particular rfc-editor link.
+    """
+    import yaml
+    from apysource.cli.add import AddCommand
+
+    yaml_path = tmp_path / "sources.yaml"
+    AddCommand(http_client=MockFetcher()).run(
+        args=[str(yaml_path), "RFC 9110", "Hello world"])
+
+    entry = yaml.safe_load(yaml_path.read_text())["sources"][0]
+    assert entry["label"] == "RFC 9110"
+    assert "url" not in entry
+    assert entry["fragments"][0]["snippet"] == "Hello world"
+
+
+def test_a_second_add_by_name_appends_rather_than_duplicating(tmp_path, capsys):
+    """A url-less entry has no url to match on. Matching by url anyway would mint
+    a second `RFC 9110` — and two entries with one identity is exactly what the
+    loader refuses, so the file `add` wrote would not load."""
+    import yaml
+    from apysource.cli.add import AddCommand
+
+    yaml_path = tmp_path / "sources.yaml"
+    cmd = AddCommand(http_client=MockFetcher("<p>Hello world</p><p>Goodbye world</p>"))
+    cmd.run(args=[str(yaml_path), "RFC 9110", "Hello world"])
+    cmd.run(args=[str(yaml_path), "RFC 9110", "Goodbye world"])
+
+    sources = yaml.safe_load(yaml_path.read_text())["sources"]
+    assert len(sources) == 1
+    assert len(sources[0]["fragments"]) == 2
+
+
+def test_add_uses_the_files_own_patterns(tmp_path, capsys):
+    """The patterns `add` resolves with are the ones `check` will use on the file
+    it is writing. The two cannot disagree."""
+    import yaml
+    from apysource.cli.add import AddCommand
+
+    yaml_path = tmp_path / "sources.yaml"
+    yaml_path.write_text(
+        "patterns:\n"
+        "  - match: '^W3C (?P<slug>[a-z0-9-]+)$'\n"
+        "    source: {url: 'http://example.com/TR/{slug}/', type: text/html}\n"
+        "sources: []\n")
+
+    AddCommand(http_client=MockFetcher()).run(
+        args=[str(yaml_path), "W3C css-color-4", "Hello world"])
+
+    sources = yaml.safe_load(yaml_path.read_text())["sources"]
+    assert sources[0]["label"] == "W3C css-color-4"
+    assert "http://example.com/TR/css-color-4/" in capsys.readouterr().err
+
+
+def test_add_by_name_fetches_the_entrys_own_url_not_the_patterns(tmp_path, capsys):
+    """The rule `check` applies is that **the entry wins**, and `add` has to apply
+    the same one or it writes a targetter it did not measure.
+
+    It minted the url from the pattern and ignored the entry, so a file pinning
+    RFC 9110 to datatracker had its snippet located in rfc-editor's *plain text*
+    and the resulting locator appended to the *HTML* entry. `check` then ran that
+    targetter against a document it was never computed from.
+    """
+    import yaml
+    from apysource.cli.add import AddCommand
+
+    yaml_path = tmp_path / "sources.yaml"
+    yaml_path.write_text(yaml.dump({"sources": [{
+        "label": "RFC 9110",
+        "url": "https://datatracker.ietf.org/doc/html/rfc9110",
+        "type": "text/html",
+        "fragments": [],
+    }]}))
+
+    fetcher = MockFetcher()
+    AddCommand(http_client=fetcher).run(args=[str(yaml_path), "RFC 9110", "Hello world"])
+
+    assert fetcher.calls == ["https://datatracker.ietf.org/doc/html/rfc9110"], \
+        "add fetched the pattern's url instead of the one the entry pins"
+
+    sources = yaml.safe_load(yaml_path.read_text())["sources"]
+    assert len(sources) == 1
+    assert sources[0]["url"] == "https://datatracker.ietf.org/doc/html/rfc9110"
+    assert len(sources[0]["fragments"]) == 1
+
+
+def test_add_will_not_overwrite_a_file_it_cannot_read(tmp_path, capsys):
+    """`add` rewrites the whole document. A file that exists but has no `sources:`
+    was treated as empty and then replaced — a typo'd `source:` cost the author
+    everything else in the file, including any `patterns:` block."""
+    from apysource.cli.add import AddCommand
+
+    yaml_path = tmp_path / "sources.yaml"
+    original = "source:\n  - label: typo\npatterns: []\n"
+    yaml_path.write_text(original)
+
+    with pytest.raises(SystemExit):
+        AddCommand(http_client=MockFetcher()).run(
+            args=[str(yaml_path), "RFC 9110", "Hello world"])
+
+    assert "not a sources file" in capsys.readouterr().err
+    assert yaml_path.read_text() == original, "add destroyed the file it refused"
+
+
+def test_add_refuses_a_name_no_pattern_claims(tmp_path, capsys):
+    from apysource.cli.add import AddCommand
+
+    with pytest.raises(SystemExit):
+        AddCommand(http_client=MockFetcher()).run(
+            args=[str(tmp_path / "sources.yaml"), "Fetsh", "Hello world"])
+
+    assert "no pattern mints a url from 'Fetsh'" in capsys.readouterr().err
+
+
 # ── ValidateCommand ──────────────────────────────────────────────────────
 
 def test_validate_parses_ttl(tmp_path, capsys):

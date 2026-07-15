@@ -36,6 +36,10 @@ class WiktionaryRepo(BaseRepo):
     NAME = "wiktionary"
     supports_crawl = True
 
+    NAME_MATCH = r"^Wiktionary (?P<word>.+)$"
+    CANONICAL_URL = "https://en.wiktionary.org/wiki/{word}"
+    NAME_EXAMPLE = "Wiktionary hypertext"
+
     # ── Source interface ──────────────────────────────────────────────
 
     def url_to_key(self, url: str) -> str | None:
