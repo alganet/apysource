@@ -9,6 +9,7 @@ All functions require a RepoRegistry instance — no global state.
 
 import re
 from collections import defaultdict
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, cast
 
@@ -454,6 +455,35 @@ def _print_records(records: list[Failure]) -> None:
                     print(f"             {line}")
 
 
+def verdict(check: CheckResult) -> str:
+    """How a single check came out: PASS, FAIL, WARN, or nothing to say.
+
+    The one place this is decided. Two renderers is two chances to disagree
+    about whether a run was green, and the exit code hangs off the answer.
+    """
+    if check.total == 0:
+        return "----"
+    if check.failures:
+        return "FAIL"
+    if check.warnings:
+        return "WARN"
+    return "PASS"
+
+
+def tally(checks: list[CheckResult]) -> dict[str, int]:
+    """Count the verdicts. ``fail`` is what the exit code is built from."""
+    counts = {"pass": 0, "fail": 0, "warn": 0}
+    for check in checks:
+        tag = verdict(check)
+        if tag == "FAIL":
+            counts["fail"] += 1
+        elif tag == "WARN":
+            counts["warn"] += 1
+        elif tag == "PASS":
+            counts["pass"] += 1
+    return counts
+
+
 def print_report(checks: list[CheckResult], summary: bool = False,
                  title: str = "apysource Verification Report") -> int:
     """Print the verification report. Returns failure count."""
@@ -461,26 +491,13 @@ def print_report(checks: list[CheckResult], summary: bool = False,
     print(f"  {title}")
     print("=" * 70)
 
-    pass_count = 0
-    fail_count = 0
-    warn_count = 0
+    counts = tally(checks)
+    pass_count = counts["pass"]
+    fail_count = counts["fail"]
+    warn_count = counts["warn"]
 
     for check in checks:
-        failed = len(check.failures)
-
-        if check.total == 0:
-            tag = "----"
-        elif failed:
-            tag = "FAIL"
-            fail_count += 1
-        elif check.warnings:
-            tag = "WARN"
-            warn_count += 1
-        else:
-            tag = "PASS"
-            pass_count += 1
-
-        print(f"\n  [{tag}] {check.name:.<40s} {check.ok}/{check.total}")
+        print(f"\n  [{verdict(check)}] {check.name:.<40s} {check.ok}/{check.total}")
 
         if not summary:
             _print_records(check.failures)
@@ -495,3 +512,52 @@ def print_report(checks: list[CheckResult], summary: bool = False,
     print(f"  {'=' * 70}")
 
     return fail_count
+
+
+def _record_json(f: Failure) -> dict[str, Any]:
+    """One failure, as data.
+
+    The diagnosis is served as its fields rather than as its rendered lines —
+    it was kept structured precisely so a consumer would not have to parse the
+    prose back apart.
+    """
+    record: dict[str, Any] = {
+        "source": f.group,
+        "label": f.item,
+        "url": f.url,
+        "urn": f.urn,
+        "reason": f.reason,
+    }
+    if f.hint is not None:
+        hint = asdict(f.hint)
+        # percent is a property, so asdict drops it, and it is the number a
+        # reader of the JSON would actually look at.
+        hint["percent"] = f.hint.percent
+        record["hint"] = hint
+    return record
+
+
+def json_report(checks: list[CheckResult]) -> dict[str, Any]:
+    """The verification report, as data.
+
+    Same verdicts as the printed one — they come from the same function — so a
+    CI job and a human cannot be told different things about the same run.
+    Failures name the source and the fragment by their labels, which is what a
+    consumer routes on (the label is what someone wrote in the YAML; the URN is
+    what the loader made of it), and carry the URL and the URN besides.
+    """
+    counts = tally(checks)
+    return {
+        "checks": [
+            {
+                "name": check.name,
+                "status": verdict(check),
+                "ok": check.ok,
+                "total": check.total,
+                "failures": [_record_json(f) for f in check.failures],
+                "warnings": [_record_json(f) for f in check.warnings],
+            }
+            for check in checks
+        ],
+        "summary": {**counts, "failed": counts["fail"] > 0},
+    }

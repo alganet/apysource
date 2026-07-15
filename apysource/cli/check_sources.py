@@ -4,17 +4,18 @@
 
 """Run configurable source verification checks."""
 
+import json
 import sys
 from pathlib import Path
 
 from rdflib import Graph
 
-from apysource.cli._base import CLIContext, pop_flag
+from apysource.cli._base import CLIContext, UsageError, pop_flag, pop_value
 from apysource.graph import load_triples
 from apysource.http import CachedFetcher
 from apysource.namespaces import SV
 from apysource.repos import RepoRegistry
-from apysource.verification import print_report, run_checks
+from apysource.verification import json_report, print_report, run_checks
 
 
 class CheckSourcesCommand:
@@ -26,7 +27,8 @@ class CheckSourcesCommand:
     caches), ``--strict-redirects`` (fail, rather than warn, on a source URL
     that has moved), ``--strict-repos`` (fail on a repo that claimed a URL but
     could not serve it), ``--no-crawl`` (never fetch a repo document that is
-    not already cached) and ``--provenance <file>`` (write a PROV-O graph).
+    not already cached), ``--format json`` (a machine-readable report; stdout
+    then carries only JSON) and ``--provenance <file>`` (write a PROV-O graph).
     """
 
     #: Opt in to YAML-graph input: ``check`` may take a sources file as its
@@ -59,20 +61,24 @@ class CheckSourcesCommand:
         # reporting the miss instead of quietly fetching a different document.
         no_crawl, args = pop_flag(args, "--no-crawl")
 
-        # Parse --provenance flag
-        prov_path = None
-        if "--provenance" in args:
-            idx = args.index("--provenance")
-            if idx + 1 < len(args):
-                prov_path = Path(args[idx + 1])
-                args = args[:idx] + args[idx + 2:]
-            else:
-                print("Error: --provenance requires a file path", file=sys.stderr)
-                sys.exit(1)
+        try:
+            fmt, args = pop_value(args, "--format")
+            prov, args = pop_value(args, "--provenance")
+        except UsageError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        if fmt is not None and fmt != "json":
+            print(f"Error: unknown --format {fmt!r} (only 'json')", file=sys.stderr)
+            sys.exit(1)
+
+        as_json = fmt == "json"
+        prov_path = Path(prov) if prov else None
 
         if graph is not None:
             g = graph
         else:
+            # stderr, so that --format json leaves stdout carrying only JSON.
             print("\n  Loading RDF...", file=sys.stderr)
             g = load_triples(self.ctx.rdf_root)
 
@@ -91,7 +97,12 @@ class CheckSourcesCommand:
         if isinstance(results, tuple):
             results, prov_graph = results
 
-        fail_count = print_report(results)
+        if as_json:
+            report = json_report(results)
+            print(json.dumps(report, indent=2, ensure_ascii=False))
+            fail_count = report["summary"]["fail"]
+        else:
+            fail_count = print_report(results)
 
         if prov_path and prov_graph:
             prov_path.write_text(

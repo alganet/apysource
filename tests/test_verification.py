@@ -4,6 +4,7 @@
 
 """Tests for apysource.verification with synthetic graphs."""
 
+import json
 from unittest.mock import patch
 
 from rdflib import BNode, Graph, Literal, URIRef
@@ -20,7 +21,13 @@ from apysource.results import (
     RepoResult,
     TextOutcome,
 )
-from apysource.verification import print_report, run_checks, strip_headers
+from apysource.verification import (
+    json_report,
+    print_report,
+    run_checks,
+    strip_headers,
+    verdict,
+)
 
 from tests.conftest import EMPTY_REGISTRY, MockFetcher, build_chain_graph
 
@@ -743,3 +750,81 @@ def test_a_term_failure_carries_its_label():
     failure = results[0].failures[0]
     assert failure.item == "aletheia"
     assert failure.url == "http://example.com/lexicon"
+
+
+# ── The report as data (C1) ──────────────────────────────────────────────
+
+def _both_reports(source_text="x" * 100, snippet=None):
+    checks = _named_run("RFC 9110", "client_host_header",
+                        "https://www.rfc-editor.org/rfc/rfc9110.txt",
+                        snippet=snippet, text=source_text)
+    return list(checks.values())
+
+
+def test_json_and_text_reports_agree_on_the_verdict(capsys):
+    """Two renderers is two chances to disagree about whether a run was green.
+
+    They share one verdict function precisely so they cannot.
+    """
+    checks = _both_reports(snippet="a quote that is nowhere in this source text")
+
+    fail_count = print_report(checks)
+    capsys.readouterr()
+    report = json_report(checks)
+
+    assert report["summary"]["fail"] == fail_count
+    assert report["summary"]["failed"] is (fail_count > 0)
+
+    for check, record in zip(checks, report["checks"]):
+        assert record["name"] == check.name
+        assert record["ok"] == check.ok
+        assert record["total"] == check.total
+        assert record["status"] == verdict(check)
+
+
+def test_json_report_is_serializable_and_routes_by_label():
+    """What CI actually needs: the label, to route a failure back to its file."""
+    checks = _both_reports(snippet="a quote that is nowhere in this source text")
+    report = json_report(checks)
+
+    round_tripped = json.loads(json.dumps(report))   # no live objects survive in
+
+    failures = [f for c in round_tripped["checks"] for f in c["failures"]]
+    assert failures
+    record = failures[0]
+    assert record["source"] == "RFC 9110"
+    assert record["label"] == "client_host_header"
+    assert record["url"] == "https://www.rfc-editor.org/rfc/rfc9110.txt"
+    assert record["urn"].startswith("http://x/frag")
+
+
+def test_json_serves_the_diagnosis_as_data_not_prose():
+    """The diagnosis was kept structured for exactly this. Cash the cheque."""
+    source = "The quick brown fox jumps over the lazy dog every single morning."
+    snippet = "The quick brown fox leaps over the lazy dog every single morning."
+    checks = _both_reports(source_text=source, snippet=snippet)
+
+    report = json_report(checks)
+    failures = [f for c in report["checks"] for f in c["failures"] if "hint" in f]
+    assert failures
+
+    hint = failures[0]["hint"]
+    assert "leaps" in hint["missing"] or "jumps" in hint["extra"]
+    assert hint["source_text"]
+    # percent is a property, so asdict drops it; it is the number a reader looks
+    # at, so it is put back explicitly.
+    assert hint["percent"] == round(hint["ratio"] * 100)
+
+
+def test_a_green_run_reports_no_failures_either_way(capsys):
+    source = "the quick brown fox jumps over the lazy dog every single morning"
+    checks = _both_reports(source_text="Prologue. " + source + " The end.",
+                           snippet=source)
+    fail_count = print_report(checks)
+    capsys.readouterr()
+
+    report = json_report(checks)
+    assert fail_count == 0
+    assert report["summary"]["fail"] == 0
+    assert report["summary"]["failed"] is False
+    assert all(not c["failures"] for c in report["checks"])

@@ -5,6 +5,7 @@
 """Tests for CLI commands with injected args (no sys.argv mutation)."""
 
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -281,3 +282,52 @@ def test_check_sources_crawls_by_default(capsys):
     kwargs = run.call_args.kwargs
     assert kwargs["strict_repos"] is False
     assert kwargs["crawl"] is True
+
+
+# ── check --format json (C1) ────────────────────────────────────────────
+
+def _run_check(args, capsys):
+    """Run CheckSourcesCommand, returning (exit_code, stdout, stderr)."""
+    from apysource.cli.check_sources import CheckSourcesCommand
+
+    ctx = CLIContext(project_root=".", rdf_subdir="rdf",
+                     sources_cache_subdir="data/sources")
+    cmd = CheckSourcesCommand(ctx=ctx, registry=EMPTY_REGISTRY)
+    with pytest.raises(SystemExit) as exc:
+        cmd.run(graph=_make_check_graph(), args=args)
+    captured = capsys.readouterr()
+    return exc.value.code, captured.out, captured.err
+
+
+def test_check_format_json_stdout_is_parseable(capsys):
+    """stdout carries only JSON. Anything chatty belongs on stderr."""
+    code, out, _err = _run_check(["--format", "json"], capsys)
+
+    report = json.loads(out)          # the whole point: this must not throw
+    assert "checks" in report and "summary" in report
+    assert code == 1                  # this graph cannot resolve
+
+
+def test_check_json_exit_code_matches_the_text_one(capsys):
+    """A CI job and a human must not be told different things about one run."""
+    text_code, _out, _err = _run_check([], capsys)
+    json_code, out, _err = _run_check(["--format", "json"], capsys)
+
+    assert text_code == json_code
+    assert json.loads(out)["summary"]["failed"] is (json_code == 1)
+
+
+def test_check_format_requires_a_value(capsys):
+    """A flag that silently does nothing is worse than one that refuses.
+
+    The user believes the run was configured; it was not.
+    """
+    code, _out, err = _run_check(["--format"], capsys)
+    assert code == 1
+    assert "requires a value" in err
+
+
+def test_check_rejects_an_unknown_format(capsys):
+    code, _out, err = _run_check(["--format", "xml"], capsys)
+    assert code == 1
+    assert "unknown --format" in err

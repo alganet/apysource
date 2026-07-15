@@ -255,6 +255,49 @@ apysource check sources.yaml --strict-redirects   # a moved (or unchecked) URL f
 The crawler identifies itself with a `User-Agent` derived from the package version
 (`apysource/<version>`). Set a custom one in a TOML config if needed (see `defaults.toml`).
 
+## The report, as data
+
+`check --format json` writes a machine-readable report to stdout, so a CI job can
+route a failure back to whatever produced it. Everything else — progress, the
+provenance note — goes to stderr, so stdout carries only JSON.
+
+```bash
+apysource check sources.yaml --format json | jq '.checks[].failures[]'
+```
+
+```json
+{
+  "source": "MDN: Origin (stale pre-redirect URL)",
+  "label": "mdn_stale",
+  "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Origin",
+  "urn": "urn:apysource:fragment_mdn_origin_stale_pre_redirect_url_mdn_stale",
+  "reason": "mdn: no such document: en-us/web/http/headers/origin"
+}
+```
+
+`label` is what you wrote in the YAML, and is what you route on — if you label a
+fragment with the file that made the claim, the JSON hands that file straight back
+to you. `urn` is the stable identity, and the subject of the provenance graph.
+
+A snippet failure also carries a `hint`: the passage the source actually contains,
+how similar it was, and which words differ — as fields, not as rendered lines, so
+nothing has to parse prose back apart.
+
+```json
+{
+  "hint": {
+    "source_text": "The \"Host\" header field in a request provides the host and port",
+    "kind": "differs only in punctuation",
+    "ratio": 1.0, "percent": 100,
+    "missing": [], "extra": [], "where": "§ 7.2"
+  }
+}
+```
+
+The verdicts and the exit code are the same ones the printed report uses — they are
+computed once — so a CI job and a human are never told different things about the
+same run.
+
 ## Development
 
 ```bash

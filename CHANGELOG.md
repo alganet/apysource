@@ -24,6 +24,27 @@ All notable changes to this project are documented here. The format is based on
   path, so a project directory containing those words no longer hides every `.ttl` file.
 
 ### Added
+- **`check --format json`.** The report as data, on stdout, with everything else on stderr. Each
+  failure carries the source and fragment *labels* — what you wrote in the YAML, and what you route
+  on: label a fragment with the file that made the claim and the JSON hands that file straight back
+  to you. It also carries the URL and the URN, and, for a snippet failure, the diagnosis as fields
+  rather than as rendered lines — the passage the source actually contains, how similar it was, and
+  which words differ. That was kept structured for exactly this. The verdicts and the exit code are
+  computed once and shared with the printed report, so a CI job and a human are never told different
+  things about the same run.
+- **A section that is not there now says so, and names the ones that are.** A section selector that
+  matched nothing extracted the empty string, and the report could only call that `empty extraction
+  (0 chars)` — the same words it used for a document that really was empty, and for one that failed
+  to download. A typo'd section number and a dead source read identically. Now: `no section matches
+  "§ 99.9"; did you mean § 9.9, § 3.9, § 9.1, …?` Suggestions come out of the parsed document and
+  nowhere else, and are rendered as selectors you can paste straight back into `section:` — a
+  suggestion the document does not contain would be the very thing this tool exists to catch,
+  wearing a helpful face. Numbered sections rank by where they live rather than how they look: the
+  section you meant is nearly always a sibling, so `§ 1.5` offers `§ 1.1`–`§ 1.4`, not the
+  character-similar `§ 19.5`. Two neighbouring cases that also arrived as "empty extraction" are
+  fixed with it: a paragraph ordinal past the end now says how many there are, and a section
+  selector against a document with no headings at all now says *that*, instead of blaming the
+  selector for a document that never had sections.
 - **MDN pages now verify against the Markdown MDN is *written in*, not the page it renders.**
   MDN reorganizes constantly, and a moved page keeps answering its old URL with a 301 — so a
   citation that had gone stale still passed, against whatever the redirect led to. The new
@@ -76,6 +97,14 @@ All notable changes to this project are documented here. The format is based on
 - `ruff` linting/formatting, wired into `make lint`/`make format` and the `make check` gate.
 
 ### Changed
+- **A failure is now reported by the names its author gave it**, not by the slugified URN the
+  loader made of them — which was printed twice, once as the group header and once as the line
+  prefix. `urn:apysource:fragment_mdn_origin_stale_pre_redirect_url_mdn_stale` is now
+  `MDN: Origin (stale pre-redirect URL)` with `mdn_stale` under it, and the URL beside it. The slug
+  also mangled separators, so a fragment labelled by file path — how a build routes a failure back
+  to the code that made the claim — came out with its slashes eaten, and grepping the report for it
+  did not work. The URN is untouched in the provenance graph, where it is the subject and the
+  stable identity; it is simply no longer what a person is made to read.
 - **`crawl()` is now part of the `BaseRepo` contract** rather than a convention nothing called.
   Repos that implement it set `supports_crawl = True`, and its `delay` argument — which every
   built-in repo accepted and then ignored — is now honored. A custom repo written before this
