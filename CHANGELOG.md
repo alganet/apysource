@@ -13,6 +13,22 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **A section selector now names the section the passage is actually in.** `locate` looked for
+  *the shortest selector that extracts text containing the snippet* — and that objective quietly
+  guarantees the wrong answer, because a section always contains its subsections' text and always
+  has the shorter label. A passage living in § 4.2.1 was cited as § 4.2. On RFC 9110 that happened
+  to **157 of 271** paragraphs; every one of them round-tripped, which is why nothing caught it.
+  It is not a cosmetic imprecision: the scope the citation is checked against became the whole
+  parent section, so a quote that drifted from § 4.2.1 to § 4.2.5 would still verify — exactly the
+  rot that section targeting exists to catch. The objective is now the shortest selector that
+  *resolves to the passage's own section*, which also disambiguates repeated headings for free: a
+  bare title that lands on the first of two is rejected, and the ancestor path that reaches the
+  right one is used instead.
+- **`locate` says when a passage appears in more than one section.** A specification repeats
+  itself — "The response MUST include the following header fields:" sits under both § 10.2.7 and
+  § 10.3.5 of RFC 2616 — and `locate` can only pick one. Picking in silence was a quiet claim that
+  the passage lives there, and the citation would go on passing even after the passage was removed
+  from the section its author actually meant, because it survives in the other.
 - **An HTML page is now checked as a reader sees it, not as markup.** A fragment with no
   `selector:`/`section:` was matched against the raw HTML, so a sentence lifted from a
   `<meta name="description">` — or from inside a `<script>` — verified against a page whose prose

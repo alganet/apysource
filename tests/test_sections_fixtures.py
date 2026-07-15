@@ -27,7 +27,9 @@ from apysource.sections import (
     SectionNotFound,
     extract_by_selector,
     locate_section,
+    resolve_selector,
     section_labels,
+    sections_containing,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -93,16 +95,28 @@ def test_un_charter_preamble_structure(un_charter):
 
 
 def test_un_charter_locate_preamble_snippet(un_charter):
+    """The selector must name the passage's *own* section.
+
+    This asserted `"Preamble" in locator`, which was the old, broadened answer:
+    `simplify_selector` picked the shortest selector that *contained* the
+    snippet, and a section always contains its subsections' text while having a
+    shorter label. The passage actually lives in `WE THE PEOPLES…`, a subsection
+    of the Preamble — and the Preamble has **no paragraphs of its own at all**,
+    so the old citation named a section containing none of the quoted words
+    directly.
+    """
     fmt = HtmlFormat()
-    result = locate_section(
-        un_charter,
-        "to save succeeding generations from the scourge of war",
-        fmt,
-    )
+    snippet = "to save succeeding generations from the scourge of war"
+    result = locate_section(un_charter, snippet, fmt)
+
     assert result is not None
     assert result.format_name == "section"
-    # Should reference the Preamble area
-    assert "Preamble" in result.locator or "paragraph" in result.locator
+
+    root = fmt.sections(un_charter)
+    named = resolve_selector(root, result.locator)
+    assert named is not None
+    assert any(snippet in p for p in named.paragraphs), \
+        f"{result.locator!r} names a section that does not itself hold the passage"
 
 
 def test_un_charter_roundtrip_article(un_charter):
@@ -349,3 +363,60 @@ def test_a_missing_section_in_a_real_rfc_names_real_ones(rfc2616):
     assert caught.value.candidates
     for candidate in caught.value.candidates:
         assert candidate in real
+
+
+# ── The promise: a selector names the passage's own section ──────────────
+
+def _all_sections(node):
+    for child in node.children:
+        yield child
+        yield from _all_sections(child)
+
+
+@pytest.mark.parametrize("fixture", [
+    "rfc2616.txt", "un_charter.html", "markdown_syntax.md",
+    "mdn_origin.md", "http.wiki",
+])
+def test_locate_names_the_section_the_passage_actually_lives_in(fixture):
+    """The property, over every paragraph of five real documents.
+
+    `simplify_selector` looked for *the shortest selector that extracts text
+    containing the snippet* — and that objective quietly guarantees the wrong
+    answer, because a section always contains its subsections' text and always
+    has the shorter label. A passage in § 4.2.1 was cited as § 4.2. On RFC 9110
+    that was **157 of 271** paragraphs; it round-tripped every time, which is
+    why nothing caught it.
+
+    It is not a cosmetic imprecision. The scope a citation is checked against
+    became the whole parent section, so a quote drifting from § 4.2.1 to § 4.2.5
+    would still verify — exactly the rot section targeting exists to catch.
+
+    Passages a specification repeats verbatim in two places are excluded: there
+    the ambiguity is in the source, not in us, and `locate` says so on stderr.
+    """
+    body = (FIXTURES / fixture).read_text(encoding="utf-8", errors="replace")
+    fmt = detect_format(body)
+    root = fmt.sections(body)
+
+    passages = [(node, para)
+                for node in _all_sections(root)
+                for para in node.paragraphs
+                if len(para) >= 50]
+    # Sampled across the whole document rather than exhaustive: locating every
+    # one of RFC 2616's 1,311 paragraphs takes half a minute, and a stride over
+    # the lot covers the same structural variety in under a second.
+    stride = max(1, len(passages) // 60)
+
+    checked = 0
+    for node, para in passages[::stride]:
+        if len(sections_containing(root, para)) > 1:
+            continue              # the source itself is ambiguous here
+        result = locate_section(body, para, fmt)
+        assert result is not None, f"no selector for a passage in {node.title!r}"
+        assert resolve_selector(root, result.locator) is node, (
+            f"{result.locator!r} names another section; the passage is in "
+            f"{node.title!r}"
+        )
+        checked += 1
+
+    assert checked > 5, f"{fixture} exercised almost nothing ({checked})"

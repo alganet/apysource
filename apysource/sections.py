@@ -527,40 +527,102 @@ def generate_selector(root: SectionNode, snippet: str) -> str | None:
     return ", ".join(labels)
 
 
-def simplify_selector(root: SectionNode, selector: str, snippet: str) -> str:
-    """Find the shortest selector that still extracts text containing the snippet.
+def sections_containing(root: SectionNode, snippet: str) -> list[SectionNode]:
+    """Every section that contains this passage — usually one, sometimes not.
 
-    Tries ancestor labels and suffixes of the full selector, picks the shortest.
-    Skips the root-level title (too broad to be useful).
+    A specification repeats itself: "The response MUST include the following
+    header fields:" appears verbatim under both § 10.2.7 (206 Partial Content)
+    and § 10.3.5 (304 Not Modified) of RFC 2616. ``locate`` can only pick one,
+    and picking silently is a quiet claim that the passage lives *there* —
+    a citation which would go on passing even after the passage was deleted from
+    the section its author actually meant, because it survives in the other.
+
+    Only the deepest section on each branch is reported: every ancestor contains
+    the passage too, and saying so would be noise rather than ambiguity.
+    """
+    norm = _normalize(snippet)
+    found: list[SectionNode] = []
+
+    def visit(node: SectionNode) -> None:
+        deeper = False
+        for child in node.children:
+            if norm in _normalize(child.all_text()):
+                deeper = True
+                visit(child)
+        if not deeper and node is not root and norm in _normalize(node.all_text()):
+            found.append(node)
+
+    visit(root)
+    return found
+
+
+def resolve_selector(root: SectionNode, selector: str) -> SectionNode | None:
+    """The section a selector names, or None if it names none.
+
+    A trailing ``paragraph N`` narrows *within* a section rather than choosing a
+    different one, so the section it lands in is the answer.
+    """
+    parts = parse_selector(selector)
+    if not parts:
+        return None
+
+    current = root
+    for part in parts:
+        if part.kind == "paragraph":
+            return current
+        child = _find_matching_child(current, part)
+        if child is None:
+            return None
+        current = child
+    return current
+
+
+def simplify_selector(root: SectionNode, selector: str, snippet: str) -> str:
+    """The shortest selector that names *the passage's own section*.
+
+    The objective used to be "the shortest selector that extracts text
+    containing the snippet", and that quietly guaranteed the wrong answer: a
+    section always contains its subsections' text, and its label is always
+    shorter. So a passage living in § 4.2.1 was cited as § 4.2 — never wrong
+    enough to fail a round-trip, and never right. On RFC 9110 that happened to
+    **157 of 271** paragraphs.
+
+    It matters twice over. The citation is less precise than the author's own
+    source (and lint-http's rules cite exact subsections); and the scope it
+    checks against is the whole parent, so a quote drifting between § 4.2.1 and
+    § 4.2.5 would still verify — the very rot section targeting exists to catch.
+
+    Naming the target also disambiguates for free: where two sections share a
+    title, the bare title resolves to the first, so it is *rejected* here and the
+    ancestor path that does reach the right one is used instead.
     """
     norm_snippet = _normalize(snippet)
-    candidates = []
 
-    # Strategy 1: try each non-root ancestor as a standalone selector
     path = _find_snippet_path(root, snippet, [])
-    if path and len(path) > 1:
-        target = path[-1]
-        para_idx = _paragraph_index(target, snippet)
-        para_suffix = f", paragraph {para_idx}" if para_idx else ""
+    if not path:
+        return selector
 
-        # Skip path[0] (root-level title, too broad)
-        for node in path[1:]:
-            label = _section_label(node)
-            if not label:
+    target = path[-1]
+    para_idx = _paragraph_index(target, snippet)
+    para_suffix = f", paragraph {para_idx}" if para_idx else ""
+
+    # Suffixes of the path from root to the passage: the shortest that still
+    # lands on the passage's own section wins. "§ 4.2.1" beats
+    # "§ 4, § 4.2, § 4.2.1"; "§ 4.2" is not a candidate at all, because it names
+    # a different section.
+    candidates = []
+    for start in range(len(path)):
+        labels = [_section_label(node) for node in path[start:]]
+        if not all(labels):
+            continue
+        base = ", ".join(labels)
+        for suffix in ([para_suffix, ""] if para_suffix else [""]):
+            candidate = base + suffix
+            if resolve_selector(root, candidate) is not target:
                 continue
-            for suffix in ([para_suffix, ""] if para_suffix else [""]):
-                candidate = label + suffix
-                text = extract_by_selector(root, candidate)
-                if text and norm_snippet in _normalize(text):
-                    candidates.append(candidate)
-
-    # Strategy 2: try suffixes of the full selector (skip the full thing)
-    parts = [p.strip() for p in selector.split(",")]
-    for start in range(len(parts) - 1, 0, -1):
-        candidate = ", ".join(parts[start:])
-        text = extract_by_selector(root, candidate)
-        if text and norm_snippet in _normalize(text):
-            candidates.append(candidate)
+            text = extract_by_selector(root, candidate)
+            if text and norm_snippet in _normalize(text):
+                candidates.append(candidate)
 
     if candidates:
         return min(candidates, key=len)

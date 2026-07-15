@@ -22,7 +22,7 @@ from apysource.formats import (
     normalize_mime_type,
 )
 from apysource.namespaces import OA, SCHEMA, SV, new_graph
-from apysource.sections import locate_section
+from apysource.sections import _section_label, locate_section, sections_containing
 
 
 def _extract_title(body: str, fmt: ContentFormat) -> str:
@@ -36,6 +36,32 @@ def _extract_title(body: str, fmt: ContentFormat) -> str:
     """
     title = getattr(fmt, "title", None)
     return str(title(body)) if title is not None else ""
+
+
+def _warn_if_ambiguous(body: str, snippet: str, fmt, result: LocateResult) -> None:
+    """Say so when the passage appears in more than one section.
+
+    Specifications repeat themselves — "The response MUST include the following
+    header fields:" sits under both § 10.2.7 and § 10.3.5 of RFC 2616 — and
+    `locate` can only choose one. Choosing silently is a quiet claim that the
+    passage lives there, and the citation would go on passing even after the
+    passage was removed from the section its author actually meant, because it
+    survives in the other. Naming the alternatives lets the author disambiguate
+    now: quote more of the passage, or say which section they meant.
+    """
+    sections = getattr(fmt, "sections", None)
+    if sections is None:
+        return
+
+    matches = sections_containing(sections(body), snippet)
+    if len(matches) < 2:
+        return
+
+    others = [_section_label(node) or node.title for node in matches]
+    print(f"  Note: this passage appears in {len(matches)} sections: "
+          f"{', '.join(others)}", file=sys.stderr)
+    print(f"        citing {result.locator}; quote more of it, or set "
+          f"`section:` yourself, to be sure", file=sys.stderr)
 
 
 def _warn_if_redirected(http_client, url: str) -> None:
@@ -78,6 +104,8 @@ def find_snippet(http_client, url: str, snippet: str,
     result = locate_section(body, snippet, fmt)
     if result is None:
         result = locate_snippet(body, snippet, content_type)
+    else:
+        _warn_if_ambiguous(body, snippet, fmt, result)
 
     if result is None:
         print(f"Error: snippet not found in {url}", file=sys.stderr)
