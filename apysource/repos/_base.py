@@ -146,6 +146,17 @@ class BaseRepo:
         missing page and to an unreachable server alike; only the status it saw
         can tell them apart, and when it saw none, we say we do not know.
         """
+        if self.http_client is None:
+            # A repo wired without a fetcher used to reach this line and die on
+            # `NoneType has no attribute 'get'` — a traceback, out of the middle
+            # of a crawl, for what is a one-line mistake in a config file. A
+            # misconfiguration is the author's to fix and ours to name.
+            raise RepoUnavailable(
+                self.NAME, key,
+                "no HTTP client is wired into this repo, so it cannot fetch "
+                "anything. Give the registry an `http_client` (see defaults.toml).",
+            )
+
         text = self.http_client.get(url, delay=self.crawl_delay, timeout=timeout,
                                     force=force, from_cache=from_cache)
         if text is not None:

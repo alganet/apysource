@@ -245,6 +245,156 @@ def test_gutenberg_process_text_crawls_and_segments(tmp_path):
     assert (tmp_path / "42_chapters.json").exists()
 
 
+# ── The book the repo had, and would not read ──────────────────────────────
+#
+# Every test above passes with two bugs in place, and it is worth being precise
+# about why, because the reason is not carelessness — it is that the fixtures and
+# the code were written from the same book.
+#
+# Aesop is the example in this repository, and a fable is a page long. So no
+# chapter here ever ran past SMALL_FILE_THRESHOLD, and the branch past it — which
+# returned "" for a chapter that had been located correctly and read correctly —
+# was never taken. And no fixture ever omitted `location:`, so nothing ever
+# reached the title search with an empty string, where `location in title` is
+# true of every title there is.
+#
+# Against Moby-Dick both fired at once. The repo had fetched all 143 chapters and
+# had them on disk, and told a citation of "Call me Ishmael." that the book does
+# not contain it.
+
+def _book(tmp_path, chapters):
+    """A cached book: the chapter index, and the chapter files beside it."""
+    index = []
+    for i, (title, body) in enumerate(chapters, 1):
+        name = f"7_ch{i:03d}.txt"
+        (tmp_path / name).write_text(
+            f"# The Book\n# Chapter: {title}\n# Source: x\n# Accessed: y\n\n{body}",
+            encoding="utf-8")
+        index.append({"number": i, "title": title, "chars": len(body), "file": name})
+    (tmp_path / "7_chapters.json").write_text(json.dumps(index))
+    return index
+
+
+LONG = "Call me Ishmael. " + ("Some years ago, never mind how long precisely. " * 200)
+
+
+def test_a_citation_naming_no_chapter_gets_the_book(tmp_path):
+    """The bug, at its root.
+
+    A fragment with no `location:` has not asked for a chapter, and everywhere
+    else in apysource that means the whole document. It used to fall through to
+    the title search, where the empty string is a substring of every title — so
+    it resolved to *the first chapter*, silently, and a quote from anywhere else
+    in the book was reported as absent from the source.
+    """
+    repo = _gutenberg(tmp_path, matchers=[])
+    _book(tmp_path, [("Front Matter", "Title page. Release date."),
+                     ("Loomings", LONG)])
+
+    path = repo.resolve_location("", "7")
+    assert path is not None
+    text = repo.extract_content("", path)
+
+    assert "Call me Ishmael" in text, "the book was fetched, and not read"
+    assert "Title page" in text, "the whole book, not one chapter of it"
+
+
+def test_a_located_chapter_longer_than_the_threshold_comes_back_whole(tmp_path):
+    """The second bug, and the larger one.
+
+    `resolve_location` has already honoured the `location:` by choosing this
+    file. There is nothing left to narrow, and the file *is* the answer. It used
+    to be returned only if it was under five thousand characters, and otherwise
+    replaced with "" — so every citation to a chapter of any real length failed
+    as "empty extraction (0 chars)", and blamed the quote for the size of its
+    source.
+    """
+    repo = _gutenberg(tmp_path, matchers=[])
+    _book(tmp_path, [("Front Matter", "short"), ("Loomings", LONG)])
+    assert len(LONG) > 5000, "the fixture has to be big enough to reach the bug"
+
+    path = repo.resolve_location("chapter:2", "7")
+    text = repo.extract_content("chapter:2", path)
+
+    assert "Call me Ishmael" in text
+    assert len(text) > 5000
+
+
+def test_a_location_matching_several_chapters_is_refused(tmp_path):
+    """Two chapters that cannot be told apart are not something to guess between.
+
+    The title search took the first match and moved on. In a book with 143
+    chapters, "EXTRACTS" answers to two of them, and picking one without saying
+    so is the same sin as picking the first one for an empty location.
+    """
+    repo = _gutenberg(tmp_path, matchers=[])
+    _book(tmp_path, [("EXTRACTS.", "a"), ("EXTRACTS. (Supplied by a Usher)", "b")])
+
+    assert repo.resolve_location("extracts", "7") is None
+
+
+def test_a_location_matching_nothing_is_refused(tmp_path):
+    repo = _gutenberg(tmp_path, matchers=[])
+    _book(tmp_path, [("Loomings", LONG)])
+
+    assert repo.resolve_location("chapter:999", "7") is None
+    assert repo.resolve_location("The Whiteness of the Whale", "7") is None
+
+
+def test_the_book_is_assembled_from_a_cache_that_already_exists(tmp_path):
+    """A fix that only works on a cold cache is not a fix.
+
+    The caches that exist are precisely the ones that have been lying, and nobody
+    re-crawls a book that verifies. So the whole text is assembled from the
+    chapter files already on disk — with no fetcher wired in at all, which is the
+    only way to prove no crawl happened.
+    """
+    repo = _gutenberg(tmp_path, fetcher=None, matchers=[])
+    _book(tmp_path, [("Front Matter", "Title page."), ("Loomings", LONG)])
+
+    text = repo.extract_content("", repo.resolve_location("", "7"))
+    assert "Call me Ishmael" in text
+
+
+def test_the_assembled_book_carries_no_chapter_headers(tmp_path):
+    """Stitching 143 chapter files together would otherwise run 143 "# Accessed:"
+    lines through the middle of the book, between the sentences a quote spans."""
+    repo = _gutenberg(tmp_path, matchers=[])
+    _book(tmp_path, [("One", "first body"), ("Two", "second body")])
+
+    text = repo.extract_content("", repo.resolve_location("", "7"))
+    assert "# Accessed" not in text and "# Chapter:" not in text
+    assert "first body" in text and "second body" in text
+
+
+def test_an_incomplete_cache_yields_no_book_rather_than_half_of_one(tmp_path):
+    """Half a book would let a quote from the missing half be reported as absent
+    from the source — the same failure, moved one shelf along."""
+    repo = _gutenberg(tmp_path, matchers=[])
+    _book(tmp_path, [("One", "first body"), ("Two", "second body")])
+    (tmp_path / "7_ch002.txt").unlink()
+
+    assert repo.resolve_location("", "7") is None
+
+
+def test_a_recrawl_does_not_leave_a_stale_book_behind(tmp_path):
+    """--refresh exists because the old text is not to be trusted. An assembled
+    book from the previous crawl would survive it and go on being served."""
+    repo = _gutenberg(tmp_path, matchers=[])
+    _book(tmp_path, [("One", "the old text of the book")])
+    stale = repo.resolve_location("", "7")
+    assert stale is not None and "old text" in stale.read_text()
+
+    html = ("<html><head><title>My Book</title></head><body><h2>One</h2><p>"
+            + "the new text of the book " * 10 + "</p></body></html>")
+    repo.http_client = MockFetcher(html)
+    repo.crawl("7", force=True)
+
+    text = repo.extract_content("", repo.resolve_location("", "7"))
+    assert "new text" in text
+    assert "old text" not in text, "the refreshed book still served the old one"
+
+
 # ── Gutenberg matchers ─────────────────────────────────────────────────────
 
 def test_bible_matcher_finds_book():

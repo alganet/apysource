@@ -4,14 +4,33 @@
 
 # Aesop's Fables example — apysource configuration
 
+# Every bare key belongs to the table above it, so all of these have to come
+# before the first [table] header — TOML, not apywire.
+
 project_root = "."
 rdf_subdir = "rdf"
 sources_cache_subdir = "data/sources"
+http_cache_dir = "data/cache"
 
-# ── Repos + registry ─────────────────────────────────────────────────────
+default_crawl_delay = 3.0
+default_http_timeout = 30
 
 gutenberg_url_pattern = "gutenberg\\.org/ebooks/(\\d+)"
 gutenberg_base_url = "https://www.gutenberg.org"
+
+# ── HTTP client ──────────────────────────────────────────────────────────
+
+# Without this the repo has nothing to fetch with. `check` crawls a repo document
+# that is not cached, so on a cold cache — which is what anyone running this
+# example for the first time has — the crawl reached a repo whose http_client was
+# None, and died on `NoneType has no attribute 'get'`.
+
+["apysource.http.CachedFetcher http_client"]
+cache_dir = "{http_cache_dir}"
+default_delay = "{default_crawl_delay}"
+default_timeout = "{default_http_timeout}"
+
+# ── Repos + registry ─────────────────────────────────────────────────────
 
 ["apysource.repos.gutenberg.GutenbergRepo repo_gutenberg"]
 url_pattern = "{gutenberg_url_pattern}"
@@ -20,6 +39,8 @@ base_url = "{gutenberg_base_url}"
 ["apysource.repos.RepoRegistry registry"]
 repos = ["{repo_gutenberg}"]
 sources_cache_dir = "{sources_cache_subdir}"
+http_client = "{http_client}"
+default_crawl_delay = "{default_crawl_delay}"
 
 # ── CLI ───────────────────────────────────────────────────────────────────
 

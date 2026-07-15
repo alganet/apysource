@@ -20,11 +20,25 @@ from apysource.formats import html_text, normalize_ws
 from apysource.repos._base import (
     BaseRepo,
     RepoNotFound,
-    SMALL_FILE_THRESHOLD,
     extract_line_range,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_chapter_header(text: str) -> str:
+    """Drop the ``#``-prefixed provenance block a chapter file opens with.
+
+    Stitching 143 of those into one document would put 143 "# Accessed:" lines
+    through the middle of the book, between the very sentences a citation spans.
+    """
+    lines = text.splitlines()
+    start = 0
+    while start < len(lines) and lines[start].startswith("#"):
+        start += 1
+    while start < len(lines) and not lines[start].strip():
+        start += 1
+    return "\n".join(lines[start:])
 
 
 class GutenbergRepo(BaseRepo):
@@ -37,6 +51,11 @@ class GutenbergRepo(BaseRepo):
 
     NAME = "gutenberg"
     supports_crawl = True
+
+    #: The assembled whole-book file. Distinct from ``{id}_ch001.txt`` so it can
+    #: never be mistaken for a chapter, and named so a crawl can find and delete
+    #: a stale one.
+    WHOLE_SUFFIX = "_full.txt"
 
     def __init__(self, cache_dir=None, http_client=None, matchers=None,
                  url_pattern=None, base_url=None):
@@ -65,10 +84,25 @@ class GutenbergRepo(BaseRepo):
         return (self.cache_dir / f"{key}_chapters.json").exists()
 
     def resolve_location(self, location: str, key: str) -> Path | None:
-        """Map a sourceLocation to a chapter file."""
+        """Map a sourceLocation to a chapter file — or, naming none, to the book."""
         chapters = self._load_chapters(key)
         if not chapters:
             return None
+
+        # A citation that names no chapter has not asked for one, and what it
+        # cited is the book. Everywhere else in apysource a fragment with no
+        # targetter is matched against the whole document; a repo does not get
+        # to invent targeting the citation did not ask for.
+        #
+        # This used to fall through to the title search below, where the test is
+        # `location in title` — and the empty string is a substring of every
+        # title on earth. So it silently resolved to *the first chapter*, which
+        # for Moby-Dick is 247 characters of front matter, and apysource then
+        # reported that the book does not contain "Call me Ishmael." It does, in
+        # chapter 7. A wrong answer, in the tool's own confident voice, about a
+        # document it had fetched in full and declined to read.
+        if not location.strip():
+            return self._whole_text(key, chapters)
 
         ch = None
         for matcher in self.matchers:
@@ -80,17 +114,67 @@ class GutenbergRepo(BaseRepo):
             ch = self._find_chapter_by_number(location, chapters)
 
         if not ch:
-            loc_lower = location.lower().strip()
-            for candidate in chapters:
-                title = candidate.get("title", "").lower()
-                if loc_lower in title or title in loc_lower:
-                    ch = candidate
-                    break
+            ch = self._find_chapter_by_title(location, chapters)
 
         if ch:
             path = self.cache_dir / ch["file"]
             return path if path.exists() else None
         return None
+
+    @staticmethod
+    def _find_chapter_by_title(location: str, chapters: list[dict]) -> dict | None:
+        """The loose fallback: a location that reads like a chapter's title.
+
+        Kept loose — a reader writing ``location: The Fox and the Grapes`` should
+        not have to reproduce the heading exactly — but no longer *silently*
+        loose. It matched the first candidate and moved on; with 143 chapters,
+        several can answer to the same substring, and picking one of them without
+        saying so is the same sin as picking the first one for an empty location.
+
+        Two chapters that cannot be told apart are not something to guess
+        between: nothing is returned, and the report says the location matched
+        nothing rather than pretending it matched the right thing.
+        """
+        needle = location.lower().strip()
+        if not needle:
+            return None
+
+        matches = [
+            candidate for candidate in chapters
+            if (title := candidate.get("title", "").lower())
+            and (needle in title or title in needle)
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def _whole_text(self, key: str, chapters: list[dict]) -> Path | None:
+        """The book, whole — assembled from the chapters already on disk.
+
+        Built lazily from the cache rather than at crawl time, so a cache that
+        already exists gets the fix without a re-crawl. A fix that only works on
+        a cold cache is not a fix here: the caches that exist are precisely the
+        ones that have been lying, and nobody re-crawls a book that verifies.
+
+        An incomplete cache yields nothing at all, not most of the book. Half a
+        book would let a quote from the missing half be reported as absent from
+        the source — which is the failure this whole method exists to undo, moved
+        one shelf along.
+        """
+        path = self.cache_dir / f"{key}{self.WHOLE_SUFFIX}"
+        if path.exists():
+            return path
+
+        parts = []
+        for ch in chapters:
+            ch_path = self.cache_dir / ch["file"]
+            if not ch_path.exists():
+                logger.warning("[%s] chapter file %s is missing; refusing to "
+                               "assemble a partial book", key, ch["file"])
+                return None
+            parts.append(_strip_chapter_header(
+                ch_path.read_text(encoding="utf-8", errors="replace")))
+
+        path.write_text("\n\n".join(parts), encoding="utf-8")
+        return path
 
     @staticmethod
     def _find_chapter_by_number(location: str, chapters: list[dict]) -> dict | None:
@@ -104,7 +188,26 @@ class GutenbergRepo(BaseRepo):
         return None
 
     def extract_content(self, location: str, file_path: Path) -> str:
-        """Extract content from a chapter file."""
+        """Extract content from a chapter file — or from the book, whole.
+
+        **The located file is the answer.** ``resolve_location`` has already
+        honoured the ``location:`` by choosing this file; there is nothing left
+        here to narrow, and the only reason to look at ``location`` again is a
+        ``lines:`` range, which narrows *within* a chapter.
+
+        The tail of this used to be ``if len(text) < SMALL_FILE_THRESHOLD: return
+        text`` and otherwise ``return ""``. So a chapter that had been located
+        correctly, and read correctly, came back as **nothing at all** if it ran
+        past five thousand characters — reported as "empty extraction (0 chars)"
+        for a chapter that was not empty, just long. Every Gutenberg citation to
+        a chapter of any real length failed that way, and said the source was
+        empty while doing it.
+
+        It survived because the one example in the repository is Aesop, whose
+        fables are a page each. The threshold was never reached, so the branch
+        past it was never taken, and the tests agreed with the code because they
+        were written from the same book.
+        """
         text = file_path.read_text(encoding="utf-8", errors="replace")
 
         for matcher in self.matchers:
@@ -113,14 +216,8 @@ class GutenbergRepo(BaseRepo):
                 if result is not None:
                     return result
 
-        result = extract_line_range(text, location)
-        if result is not None:
-            return result
-
-        if len(text) < SMALL_FILE_THRESHOLD:
-            return text
-
-        return ""
+        lines = extract_line_range(text, location)
+        return lines if lines is not None else text
 
     # ── Crawler interface ─────────────────────────────────────────────
 
@@ -168,6 +265,14 @@ class GutenbergRepo(BaseRepo):
                                f"no chapters could be extracted from {url}")
 
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # A re-crawl rewrites every chapter. An assembled book from the *previous*
+        # crawl would survive it and go on being served — the whole point of
+        # --refresh being that the old text is not to be trusted. It is rebuilt
+        # from the new chapters on next use.
+        whole = self.cache_dir / f"{gutenberg_id}{self.WHOLE_SUFFIX}"
+        whole.unlink(missing_ok=True)
+
         for i, ch in enumerate(chapters):
             ch_path = self.cache_dir / f"{gutenberg_id}_ch{i+1:03d}.txt"
             with open(ch_path, "w", encoding="utf-8") as f:
