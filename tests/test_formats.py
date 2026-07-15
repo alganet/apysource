@@ -10,6 +10,7 @@ from apysource.formats import (
     detect_format,
     extract_content,
     locate_snippet,
+    normalize_ws,
 )
 
 
@@ -213,3 +214,101 @@ def test_dispatch_explicit_type():
     result = locate_snippet(body, "Not detected", content_type="html")
     assert result is not None
     assert result.format_name == "html"
+
+
+# ── The text a citation is checked against (E1) ──────────────────────────
+
+_PAGE = '''<!doctype html>
+<html><head>
+<meta name="description" content="The Origin header tells you the origin of the request.">
+<script>var t = "A client MUST send a Host header field.";</script>
+<style>.x { content: "never rendered"; }</style>
+</head><body>
+<main>
+<p>The <code>Origin</code> request header indicates the <a href="/x">origin</a>
+   that caused the request.</p>
+<p>Responses MUST include a Vary header.</p>
+</main>
+</body></html>'''
+
+
+def _html_verifies(snippet, locator=None):
+    text = extract_content(_PAGE, locator, format_name="text/html")
+    return normalize_ws(snippet) in normalize_ws(text)
+
+
+def test_a_page_is_checked_as_a_reader_sees_it_not_as_markup():
+    """A fragment with no selector was matched against raw HTML.
+
+    So a sentence lifted from a `<meta name="description">` — or from inside a
+    `<script>` — verified against a page whose prose said something else, while
+    the prose a reader actually saw did not match at all. Exactly inverted: it
+    passed text nobody was shown and failed text they were.
+    """
+    assert not _html_verifies("The Origin header tells you the origin of the request."), \
+        "a <meta> description is not what the page says"
+    assert not _html_verifies("A client MUST send a Host header field."), \
+        "a <script> body is not what the page says"
+    assert not _html_verifies("never rendered"), "a stylesheet is not what the page says"
+
+    assert _html_verifies(
+        "The Origin request header indicates the origin that caused the request."), \
+        "the prose a reader can see must verify"
+
+
+def test_inline_markup_does_not_glue_words_together():
+    """`get_text(strip=True)` joined stripped strings with nothing, so
+    `<p>The <code>Origin</code> request</p>` extracted as `TheOriginrequest`.
+    """
+    text = normalize_ws(extract_content(_PAGE, "main p:nth-of-type(1)",
+                                        format_name="text/html"))
+    assert "The Origin request header" in text
+    assert "TheOrigin" not in text
+
+
+def test_no_whitespace_is_invented_inside_a_word():
+    """The other half of the same coin, and the more dangerous half.
+
+    Joining every string with a separator would render `<b>Sub</b>string` as
+    "Sub string" — inventing a space a reader never saw, so a misquotation
+    would verify. Whitespace is only ever added where a browser also breaks the
+    line: at a block boundary, never between inline elements.
+    """
+    page = "<html><body><p><b>Sub</b>string is one word</p></body></html>"
+    text = normalize_ws(extract_content(page, None, format_name="text/html"))
+    assert "Substring is one word" in text
+    assert "Sub string" not in text
+
+
+def test_a_quote_spanning_two_paragraphs_verifies():
+    """Blocks are separated, so text either side of a `</p>` is not run together."""
+    assert _html_verifies("caused the request. Responses MUST include a Vary header.")
+
+
+def test_add_writes_a_citation_that_check_accepts():
+    """The bug this whole class produced: the two commands contradicted each other.
+
+    `locate` (which `add` uses) read the page one way and `extract` (which
+    `check` uses) read it another, so `add` emitted a selector that `check`
+    rejected on the very next run. They now share one rendering — and `locate`
+    additionally *proves* its selector leads back to the snippet before
+    returning it, so no future divergence can reopen this.
+    """
+    snippet = "The Origin request header indicates the origin that caused the request."
+    result = locate_snippet(_PAGE, snippet)
+
+    assert result is not None, "locate must find prose that is on the page"
+    assert _html_verifies(snippet, result.locator), \
+        f"check rejected the selector add wrote: {result.locator}"
+
+
+def test_locate_never_returns_a_selector_that_does_not_lead_back():
+    """The guard itself. A locator that does not yield the snippet is not a locator."""
+    from apysource.formats import HtmlFormat, _selector_yields
+
+    soup = HtmlFormat()._soup(_PAGE)
+    assert _selector_yields(soup, "main p:nth-of-type(2)",
+                            normalize_ws("Responses MUST include a Vary header."))
+    assert not _selector_yields(soup, "main p:nth-of-type(1)",
+                                normalize_ws("Responses MUST include a Vary header."))
+    assert not _selector_yields(soup, "p[[[bad", normalize_ws("anything"))

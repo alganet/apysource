@@ -32,12 +32,41 @@ class ContentFormat(Protocol):
         """Return True if this format handles the given body."""
         ...
 
+    def text(self, body: str) -> str:
+        """The document as a reader sees it — the text a citation is checked against.
+
+        This is the format's *one* answer to "what does this document say", and
+        every other entry point is built on it, so that they cannot disagree.
+        They used to: extraction with no locator handed back raw HTML (so a
+        snippet matched `<meta>` attributes and `<script>` bodies, while the
+        page's actual prose did not match), extraction *with* a selector glued
+        words together across inline tags, and `locate` searched a third text
+        again — which is how ``add`` came to write citations that ``check``
+        rejected.
+        """
+        ...
+
     def extract(self, body: str, locator: str) -> str:
         """Extract content from body using a format-specific locator."""
         ...
 
     def locate(self, body: str, snippet: str) -> LocateResult | None:
         """Find snippet in body, return a LocateResult or None."""
+        ...
+
+
+class SectionedFormat(ContentFormat, Protocol):
+    """A format that can name the parts of a document.
+
+    Kept separate because ``PlainTextFormat`` genuinely cannot do this: a flat
+    text file has no sections to speak of. Callers ask with
+    ``hasattr(fmt, "sections")``, and ``sections.extract_section`` turns the
+    absence into an honest "this document has no sections" rather than blaming
+    the selector.
+    """
+
+    def sections(self, body: str):
+        """Build a SectionNode tree for this document."""
         ...
 
 
@@ -85,6 +114,56 @@ def normalize_ws(text: str) -> str:
 _normalize = normalize_ws
 
 
+#: Elements a browser does not render as page text. Their contents are not
+#: prose a reader could ever have quoted — a `<script>` body, a stylesheet, the
+#: `<meta name="description">` in the head — so they are not part of what a
+#: citation is checked against. Matching them let a snippet lifted from a meta
+#: description verify against a page whose prose said something else entirely.
+NON_CONTENT_TAGS = frozenset({"script", "style", "head", "noscript", "template"})
+
+#: Elements a browser lays out as blocks. Text either side of one is separated
+#: on screen, so it is separated here too — otherwise `<p>one</p><p>two</p>`
+#: reads as `onetwo` and no quote spanning the two paragraphs can ever match.
+BLOCK_TAGS = frozenset({
+    "address", "article", "aside", "blockquote", "br", "dd", "div", "dl", "dt",
+    "figcaption", "figure", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
+    "header", "hr", "li", "main", "nav", "ol", "p", "pre", "section", "table",
+    "td", "th", "tr", "ul",
+})
+
+
+def html_text(node) -> str:
+    """The rendered text of an HTML node, with block boundaries kept apart.
+
+    Whitespace is *never invented between inline elements*, and that is the
+    whole design. A browser separates words only where the source separates
+    them, so `The <code>Origin</code> request` reads `The Origin request`
+    (the space is in the source) while `<b>Sub</b>string` reads `Substring`
+    (it is not). Joining with a separator would forge the second; joining with
+    nothing — which is what `get_text(strip=True)` did — mangles the first into
+    `TheOriginrequest`.
+
+    That asymmetry matters more than it looks: a normalizer mutates the very
+    text a snippet is matched against, so inventing a space can manufacture a
+    passing citation for prose the page never showed. Only block boundaries,
+    where a reader really does see a break, get one.
+    """
+    from bs4 import NavigableString
+
+    if isinstance(node, NavigableString):
+        return str(node)
+
+    out: list[str] = []
+    for child in node.children:
+        name = getattr(child, "name", None)
+        if name in NON_CONTENT_TAGS:
+            continue
+        out.append(html_text(child))
+        if name in BLOCK_TAGS:
+            out.append("\n")
+    return "".join(out)
+
+
 class HtmlFormat:
     """HTML content format — CSS selectors for extraction and location."""
 
@@ -99,26 +178,46 @@ class HtmlFormat:
             return True
         return False
 
+    def _soup(self, body: str):
+        """Parse once, the same way for every entry point.
+
+        `sections`, `extract`, `locate` and `text` all read the document through
+        this, so a selector that `locate` mints is a selector `extract` can
+        honour. They used to parse and render the page three different ways.
+        """
+        from bs4 import BeautifulSoup
+        return BeautifulSoup(body, "html.parser")
+
+    def _content(self, body: str):
+        """The part of the parse a reader actually sees."""
+        soup = self._soup(body)
+        return soup.find("body") or soup
+
+    def text(self, body: str) -> str:
+        """The page as a reader sees it: no markup, no head, no scripts."""
+        return html_text(self._content(body))
+
     def strip_tags(self, body: str) -> str:
-        """Convert HTML to plain text by stripping tags."""
-        text = re.sub(r'<style[^>]*>.*?</style>', '', body, flags=re.DOTALL)
-        text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
-        text = re.sub(r'<[^>]+>', '\n', text)
-        text = re.sub(r'&[a-zA-Z]+;', ' ', text)
-        text = re.sub(r'&#\d+;', ' ', text)
-        return re.sub(r'\n{3,}', '\n\n', text).strip()
+        """Convert HTML to plain text.
+
+        Kept as the long-standing name, but no longer a regex over the markup:
+        `<[^>]+>` terminates on the first `>`, so an attribute value containing
+        one spilled into the text, and `<head>` was never removed at all. It now
+        answers exactly what `text` answers, so the diagnosis a failure prints
+        describes the same document the check actually read.
+        """
+        return self.text(body)
 
     def sections(self, body: str):
         """Build a SectionNode tree from HTML headings."""
-        from bs4 import BeautifulSoup, Tag
+        from bs4 import Tag
         from apysource.sections import SectionNode
 
-        soup = BeautifulSoup(body, "html.parser")
         root = SectionNode(title="", level=0)
         heading_tags = {"h1", "h2", "h3", "h4", "h5", "h6"}
 
         # Collect all headings and paragraphs in document order
-        content_area = soup.find("body") or soup
+        content_area = self._content(body)
         elements = content_area.find_all(heading_tags | {"p"})
 
         # Stack of (level, SectionNode) for nesting
@@ -130,7 +229,7 @@ class HtmlFormat:
 
             if el.name in heading_tags:
                 level = int(el.name[1])
-                title = _normalize(el.get_text())
+                title = _normalize(html_text(el))
                 node = SectionNode(title=title, level=level)
 
                 # Pop stack until we find a parent with lower level
@@ -142,7 +241,7 @@ class HtmlFormat:
                 stack.append((level, node))
 
             elif el.name == "p":
-                text = _normalize(el.get_text())
+                text = _normalize(html_text(el))
                 if text:
                     # Add paragraph to the most recent section
                     current = stack[-1][1] if stack else root
@@ -152,21 +251,22 @@ class HtmlFormat:
 
     def extract(self, body: str, locator: str) -> str:
         """Extract text from HTML using a CSS selector."""
-        from bs4 import BeautifulSoup
-
-        soup = BeautifulSoup(body, "html.parser")
+        soup = self._soup(body)
         elements = soup.select(locator)
-        return "\n\n".join(el.get_text(strip=True) for el in elements)
+        return "\n\n".join(html_text(el) for el in elements)
 
     def locate(self, body: str, snippet: str) -> LocateResult | None:
         """Find a snippet in HTML and produce a CSS selector.
 
         Prefers the deepest (most specific) element whose text contains
         the snippet — avoids matching a parent div that includes everything.
-        """
-        from bs4 import BeautifulSoup
 
-        soup = BeautifulSoup(body, "html.parser")
+        The selector it returns is one it has *proved* works: see
+        ``_verified_locator``. A locator that does not lead back to the snippet
+        is not a locator, and emitting one made ``add`` write citations that
+        ``check`` then rejected.
+        """
+        soup = self._soup(body)
         norm_snippet = _normalize(snippet)
 
         text_tags = {"p", "li", "td", "th", "blockquote", "dd", "dt",
@@ -175,8 +275,7 @@ class HtmlFormat:
 
         matches = []
         for element in soup.find_all(text_tags):
-            text = element.get_text()
-            norm_text = _normalize(text)
+            norm_text = _normalize(html_text(element))
             if norm_snippet in norm_text:
                 depth = len(list(element.parents))
                 matches.append((depth, element, norm_text))
@@ -185,8 +284,7 @@ class HtmlFormat:
 
         for _, element, norm_text in matches:
             selector = _css_selector_for(element)
-            found = soup.select(selector)
-            if found:
+            if _selector_yields(soup, selector, norm_snippet):
                 return LocateResult(
                     format_name="html",
                     locator=selector,
@@ -209,6 +307,21 @@ class MarkdownFormat:
             return False
         # Require at least one ATX heading
         return bool(re.search(r"^#{1,6}\s", body, re.MULTILINE))
+
+    def text(self, body: str) -> str:
+        """Markdown source is what a Markdown citation is checked against.
+
+        Deliberately *not* rendered. Inline markup does survive into the text a
+        quote is matched against (a `` `code span` `` keeps its backticks), which
+        is C4 — but rendering it here would mean stripping characters out of the
+        very text a snippet is compared with, and an over-eager strip
+        manufactures passing citations for prose the document never contained.
+        That is exactly how the MDN macro normalizer forged sentences (E4). The
+        A1 diagnosis already names this case ("differs only in inline markup")
+        and shows the source's exact wording, so the author is told what to do
+        rather than quietly told a falsehood.
+        """
+        return body
 
     def sections(self, body: str):
         """Build a SectionNode tree from Markdown ATX headings."""
@@ -286,6 +399,10 @@ class WikitextFormat:
         if "[[" in head or "{{" in head:
             return True
         return False
+
+    def text(self, body: str) -> str:
+        """Wikitext source, unrendered — same reasoning as Markdown."""
+        return body
 
     def sections(self, body: str):
         """Build a SectionNode tree from Wikitext headings."""
@@ -392,6 +509,16 @@ class RfcTextFormat:
         text = re.sub(r"^.*\[Page \d+\]\s*$", "", text, flags=re.MULTILINE)
         return text
 
+    def text(self, body: str) -> str:
+        """The RFC's prose, with the pagination furniture taken out.
+
+        ``sections`` already read the document this way; whole-document
+        extraction did not, so a sentence that happened to straddle a page break
+        had `[Page 42]` and a form feed sitting in the middle of it and could
+        not be quoted at all. The footers are not part of what the RFC says.
+        """
+        return self._clean_body(body)
+
     def sections(self, body: str):
         """Build a SectionNode tree from RFC dotted-number headings."""
         from apysource.sections import SectionNode
@@ -462,6 +589,10 @@ class PlainTextFormat:
         # Fallback format — accepts anything not claimed by another format.
         return True
 
+    def text(self, body: str) -> str:
+        """A plain-text file is already its own text."""
+        return body
+
     def extract(self, body: str, locator: str) -> str:
         """Extract a line range from text. Format: 'N-M' (1-based, inclusive)."""
         match = re.match(r"(\d+)-(\d+)", locator.strip())
@@ -474,29 +605,42 @@ class PlainTextFormat:
         return "\n".join(extracted)
 
     def locate(self, body: str, snippet: str) -> LocateResult | None:
-        """Find a snippet in plain text and produce a line range."""
-        norm_snippet = _normalize(snippet)
+        """Find a snippet in plain text and produce a line range.
 
-        norm_body = _normalize(body)
-        pos = norm_body.find(norm_snippet)
-        if pos == -1:
+        One pass. This used to re-normalize a growing prefix of the whole
+        document once per line — quadratic, and 11 seconds on a 422 KB RFC,
+        which is the exact shape of document this tool exists to cite. Authoring
+        a few hundred citations against RFCs was an hour of regex.
+
+        Collapsing each line and joining the non-empty ones with a single space
+        gives precisely ``normalize_ws(body)``, because a run of whitespace
+        spanning a newline collapses to one space either way — so the offsets
+        below index the same string the caller matched against.
+        """
+        norm_snippet = _normalize(snippet)
+        if not norm_snippet:
             return None
 
         lines = body.split("\n")
-        char_count = 0
-        start_line = None
-        end_line = None
-
+        spans: list[tuple[int, int, int]] = []   # (norm_start, norm_end, line index)
+        pieces: list[str] = []
+        at = 0
         for i, line in enumerate(lines):
-            char_count += len(line) + 1  # +1 for \n
-            norm_so_far = _normalize(body[:char_count])
+            norm_line = _normalize(line)
+            if not norm_line:
+                continue
+            spans.append((at, at + len(norm_line), i))
+            pieces.append(norm_line)
+            at += len(norm_line) + 1             # + the space that will join it on
 
-            if start_line is None and len(norm_so_far) > pos:
-                start_line = i
-            if start_line is not None and len(norm_so_far) >= pos + len(norm_snippet):
-                end_line = i
-                break
+        norm_body = " ".join(pieces)
+        pos = norm_body.find(norm_snippet)
+        if pos == -1:
+            return None
+        end = pos + len(norm_snippet)
 
+        start_line = next((i for s, e, i in spans if e > pos), None)
+        end_line = next((i for s, e, i in reversed(spans) if s < end), None)
         if start_line is None or end_line is None:
             return None
 
@@ -563,12 +707,18 @@ def extract_content(body: str, locator: str | None,
     matches nothing, rather than returning "" — which the report could only
     describe as an empty extraction, indistinguishable from an empty document.
     """
-    if not locator:
-        return body
     if format_name == "section":
         from apysource.sections import extract_section
         fmt = detect_format(body, formats)
-        return extract_section(body, locator, fmt, strict=strict)
+        return extract_section(body, locator or "", fmt, strict=strict)
+    if not locator:
+        # No selector means "the whole document" — which for HTML is the page a
+        # reader sees, not its markup. This returned `body` verbatim, so a quote
+        # lifted from a `<meta name="description">` or from inside a `<script>`
+        # verified happily, while the page's own prose did not match at all: the
+        # tool passed text nobody was ever shown and failed text they were.
+        found = _find_format(format_name, formats) if format_name else None
+        return (found or detect_format(body, formats)).text(body)
     # Line ranges (N-M) always use PlainTextFormat regardless of document type
     if re.match(r"^\d+-\d+$", locator.strip()):
         return PlainTextFormat().extract(body, locator)
@@ -601,6 +751,29 @@ def locate_snippet(body: str, snippet: str,
 
 
 # ── Private helpers ─────────────────────────────────────────────────────
+
+def _selector_yields(soup, selector: str, norm_snippet: str) -> bool:
+    """Does this selector actually lead back to the snippet?
+
+    ``locate`` used to ask only whether the selector matched *something*, which
+    is a weaker question than the one that matters, and the gap between the two
+    is exactly where the bug lived: ``extract`` rendered the selected element
+    differently from how ``locate`` had read it, so ``add`` happily wrote a
+    citation that ``check`` rejected on the very next run.
+
+    Asking the real question closes that class of bug for good, whatever future
+    divergence anyone introduces — a locator that does not lead back to the
+    snippet simply is not returned.
+    """
+    try:
+        found = soup.select(selector)
+    except Exception:  # noqa: BLE001 — a malformed selector is just a miss
+        return False
+    if not found:
+        return False
+    rendered = _normalize("\n\n".join(html_text(el) for el in found))
+    return norm_snippet in rendered
+
 
 def _css_selector_for(element) -> str:
     """Generate a CSS selector path from an element to its nearest ancestor with an id."""
