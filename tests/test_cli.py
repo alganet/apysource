@@ -160,8 +160,33 @@ def test_validate_parses_ttl(tmp_path, capsys):
     cmd.run(args=[])
 
     out = capsys.readouterr().out
-    assert "1 files" in out
-    assert "OK" in out
+    # It printed the number of files it *found* (rglob), not the number it
+    # parsed — the two differ exactly when a file is being silently dropped.
+    assert "triples — OK" in out
+    # No shapes in this directory, so SHACL cannot have run, and the command
+    # must not claim otherwise.
+    assert "SHACL — SKIPPED" in out
+    assert "All checks passed" not in out
+
+
+def test_validate_refuses_to_pass_when_it_validated_nothing(tmp_path, capsys):
+    """It reported "All checks passed" over an empty directory.
+
+    The commonest way to get there is pointing the command at the wrong path —
+    and a validator that validates nothing and calls it green is the whole
+    disease.
+    """
+    from apysource.cli.validate import ValidateCommand
+
+    (tmp_path / "rdf").mkdir()
+    ctx = CLIContext(project_root=str(tmp_path), rdf_subdir="rdf",
+                     sources_cache_subdir="data/sources")
+
+    with pytest.raises(SystemExit) as exc:
+        ValidateCommand(ctx=ctx).run(args=[])
+
+    assert exc.value.code == 1
+    assert "NOTHING WAS VALIDATED" in capsys.readouterr().out
 
 
 # ── CheckSourcesCommand ─────────────────────────────────────────────────
