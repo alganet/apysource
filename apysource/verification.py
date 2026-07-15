@@ -264,9 +264,26 @@ def run_checks(
                         _failure(result, entity, f'"{loc}" -> {result.status}'))
                     continue
 
-                outcome = load_text(result, max_chars=50000, force=force,
+                outcome = load_text(result, max_chars=None, force=force,
                                     crawl=crawl)
                 clean = strip_headers(outcome.text) if outcome.text else ""
+
+                # A Term need not quote anything — the shapes ask only for a URL
+                # and a label, and "this term is backed by a source that exists"
+                # is the whole claim. But when one *does* carry a quote, it was
+                # read by nobody: only chain mode ever looked at oa:exact. A
+                # citation whose quote is never checked is not a citation.
+                term_snippet = (_get_snippet(g, entity) or "").strip()
+                if term_snippet and len(clean) >= MIN_EXTRACT_CHARS:
+                    quote = re.sub(r"(\.\.\.|…)$", "",
+                                   normalize_ws(term_snippet)).strip()
+                    if quote and quote not in normalize_ws(outcome.text):
+                        fail_list.append(_failure(
+                            result, entity, "snippet not found in extracted content",
+                            diagnose(quote, normalize_ws(outcome.text)),
+                        ))
+                        continue
+
                 if len(clean) >= 3:
                     ok_list.append(entity)
                 else:
@@ -368,14 +385,47 @@ def _run_chain_checks(
                               len(extract_ok), len(fragments), extract_fail))
 
     # CHECK: Snippet verified (reads oa:exact from TextQuoteSelector)
-    # Resolve each fragment's snippet once, then keep those long enough to verify.
+    #
+    # Every fragment is answered for. Fragments without a usable snippet used to
+    # be *filtered out of the check entirely* — not passed, not failed, simply
+    # absent from both sides of the tally. A file whose fragments had lost their
+    # snippets (a misspelled `snipet:`, a `section:` and nothing else) reported
+    #
+    #     [PASS] Fragments: cache resolution ... 2/2
+    #     [----] Fragments: snippet verified .... 0/0
+    #     Summary: 3 PASS, 0 FAIL — EXIT CODE: 0 (all checks passed)
+    #
+    # "All checks passed", for a run in which not one citation was checked. The
+    # single thing this tool exists to do had been skipped, silently, and the
+    # build was green. A fragment with nothing to verify is a broken citation,
+    # and it now says so.
     snippets = {f: (_get_snippet(g, f) or "") for f in fragments}
-    snippet_frags = [f for f in fragments
-                     if len(snippets[f].strip()) >= MIN_EXTRACT_CHARS]
     snippet_ok = []
     snippet_fail = []
-    for frag in snippet_frags:
-        norm_snippet = normalize_ws(snippets[frag])
+    for frag in fragments:
+        result = resolved[frag]
+        snippet = snippets[frag].strip()
+
+        if not snippet:
+            snippet_fail.append(_failure(
+                result, frag,
+                "no snippet: this fragment quotes nothing, so there is nothing "
+                "to verify",
+            ))
+            continue
+
+        if len(snippet) < MIN_EXTRACT_CHARS:
+            # A handful of characters is not evidence: "MUST" appears in every
+            # specification ever written, and matching it proves nothing about
+            # the passage the citation claims to quote.
+            snippet_fail.append(_failure(
+                result, frag,
+                f"snippet is too short to be evidence ({len(snippet)} chars; "
+                f"at least {MIN_EXTRACT_CHARS} are needed)",
+            ))
+            continue
+
+        norm_snippet = normalize_ws(snippet)
         # A trailing ellipsis ("..." or "…") marks a deliberately elided quote:
         # the author kept only the opening of a longer passage, so matching the
         # retained prefix is correct. Stripping it leaves the text that must
@@ -383,7 +433,6 @@ def _run_chain_checks(
         # in the source — otherwise drift in the tail would go undetected.
         norm_snippet = re.sub(r"(\.\.\.|…)$", "", norm_snippet).strip()
 
-        result = resolved[frag]
         if result.status != "resolved":
             snippet_fail.append(
                 _failure(result, frag, "cache not resolved for verification"))
@@ -430,7 +479,7 @@ def _run_chain_checks(
                 prov_graph.add((frag, SV.verificationStatus, Literal("failed")))
 
     checks.append(CheckResult(f"{base_name}: snippet verified",
-                              len(snippet_ok), len(snippet_frags), snippet_fail))
+                              len(snippet_ok), len(fragments), snippet_fail))
 
     return checks, list(resolved.values())
 
@@ -492,6 +541,27 @@ def tally(checks: list[CheckResult]) -> dict[str, int]:
     return counts
 
 
+def nothing_verified(checks: list[CheckResult]) -> bool:
+    """Whether this run looked at nothing at all.
+
+    ``sources: []``, or a file whose fragments all failed to load, reported
+    ``Summary: 0 PASS, 0 FAIL — EXIT CODE: 0 (all checks passed)``. A verifier
+    asked to verify nothing, answering "everything is fine", is the silent green
+    this whole tool exists to abolish — and the way it happens in practice is a
+    generator that breaks and emits an empty file, after which CI stays green
+    forever and no one looks again.
+
+    There is nothing here to be *wrong* about, so it is not a failure of any
+    citation. It is a failure of the run, and it is reported as one.
+    """
+    return not any(check.total for check in checks)
+
+
+def failed(checks: list[CheckResult]) -> bool:
+    """Whether this run should be called a failure. The one place it is decided."""
+    return tally(checks)["fail"] > 0 or nothing_verified(checks)
+
+
 def print_report(checks: list[CheckResult], summary: bool = False,
                  title: str = "apysource Verification Report") -> int:
     """Print the verification report. Returns failure count."""
@@ -513,7 +583,10 @@ def print_report(checks: list[CheckResult], summary: bool = False,
 
     print(f"\n  {'=' * 70}")
     print(f"  Summary: {pass_count} PASS, {fail_count} FAIL, {warn_count} WARN")
-    if fail_count > 0:
+    if nothing_verified(checks):
+        print("  NOTHING WAS VERIFIED: this graph holds no fragments or terms.")
+        print("  EXIT CODE: 1 (a verifier that verifies nothing has not passed)")
+    elif fail_count > 0:
         print("  EXIT CODE: 1 (failures present)")
     else:
         print("  EXIT CODE: 0 (all checks passed)")
@@ -567,5 +640,10 @@ def json_report(checks: list[CheckResult]) -> dict[str, Any]:
             }
             for check in checks
         ],
-        "summary": {**counts, "failed": counts["fail"] > 0},
+        "summary": {
+            **counts,
+            "verified": sum(check.ok for check in checks),
+            "nothing_verified": nothing_verified(checks),
+            "failed": failed(checks),
+        },
     }

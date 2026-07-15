@@ -867,3 +867,72 @@ def test_a_citation_past_the_first_100k_chars_is_still_found():
     check = next(c for c in results if "snippet verified" in c.name)
     assert check.ok == 1, f"a passage at char {at:,} must still be found"
     assert check.failures == []
+
+
+# ── A green run must have verified something ─────────────────────────────
+
+def _snippet_check(graph_builder):
+    resolved = FetcherResult(
+        status="resolved", label="frag", source="RFC 9110",
+        url="http://example.com/spec",
+        fetcher=MockFetcher(content="The Host header field provides the host."),
+        format_name="text/plain", locator=None,
+    )
+    g, _frag = graph_builder()
+    checks_config = [{"name": "F", "class_uri": SV.Fragment, "mode": "chain"}]
+    with patch("apysource.verification.resolve_chain", return_value=resolved):
+        results = run_checks(g, checks_config, EMPTY_REGISTRY)
+    return next(c for c in results if "snippet verified" in c.name)
+
+
+def test_a_fragment_with_no_snippet_is_a_failure_not_an_omission():
+    """It reported `[----] snippet verified 0/0` and `EXIT CODE: 0`.
+
+    Fragments with no usable snippet were filtered out of the check entirely —
+    not passed, not failed, absent from both sides of the tally. A file whose
+    fragments had lost their snippets (a misspelled `snipet:`, or a `section:`
+    and nothing else) printed "all checks passed" for a run in which **not one
+    citation was checked**. The single thing this tool exists to do had been
+    skipped, silently, and the build was green.
+    """
+    check = _snippet_check(_make_chain_graph)   # a fragment with no oa:exact
+
+    assert check.total == 1, "the fragment must be answered for, not dropped"
+    assert check.ok == 0
+    assert len(check.failures) == 1
+    assert "nothing to verify" in check.failures[0].reason
+
+
+def test_a_snippet_too_short_to_be_evidence_is_a_failure():
+    """"MUST" appears in every specification ever written."""
+    check = _snippet_check(lambda: _chain_graph_with_snippet("MUST"))
+
+    assert check.total == 1 and check.ok == 0
+    assert "too short to be evidence" in check.failures[0].reason
+
+
+def test_a_real_snippet_still_passes():
+    """The fix must not simply fail everything."""
+    check = _snippet_check(
+        lambda: _chain_graph_with_snippet("The Host header field provides the host."))
+    assert check.ok == 1 and check.failures == []
+
+
+def test_a_run_that_verified_nothing_is_not_a_pass():
+    """`sources: []` reported "0 PASS, 0 FAIL — EXIT CODE: 0 (all checks passed)".
+
+    A verifier asked to verify nothing, answering "everything is fine", is the
+    silent green this tool exists to abolish. It happens in practice when a
+    generator breaks and emits an empty file — after which CI stays green
+    forever and nobody looks again.
+    """
+    from apysource.verification import failed, nothing_verified, tally
+
+    empty = [CheckResult("Fragments", 0, 0, []), CheckResult("Terms", 0, 0, [])]
+    assert nothing_verified(empty)
+    assert failed(empty), "a run that checked nothing has not passed"
+    assert tally(empty)["fail"] == 0, "no citation failed; the *run* did"
+
+    real = [CheckResult("Fragments", 1, 1, [])]
+    assert not nothing_verified(real)
+    assert not failed(real)

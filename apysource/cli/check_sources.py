@@ -15,7 +15,7 @@ from apysource.graph import load_triples
 from apysource.http import CachedFetcher
 from apysource.namespaces import SV
 from apysource.repos import RepoRegistry
-from apysource.verification import json_report, print_report, run_checks
+from apysource.verification import failed, json_report, print_report, run_checks
 
 
 class CheckSourcesCommand:
@@ -100,9 +100,13 @@ class CheckSourcesCommand:
         if as_json:
             report = json_report(results)
             print(json.dumps(report, indent=2, ensure_ascii=False))
-            fail_count = report["summary"]["fail"]
         else:
-            fail_count = print_report(results)
+            print_report(results)
+
+        # One rule, shared by both renderers, so a CI job and a human are never
+        # told different things about the same run — including the run that
+        # checked nothing at all, which used to be reported as a pass.
+        failure = failed(results)
 
         if prov_path and prov_graph:
             prov_path.write_text(
@@ -111,4 +115,4 @@ class CheckSourcesCommand:
             )
             print(f"\n  Provenance written to {prov_path}", file=sys.stderr)
 
-        sys.exit(1 if fail_count > 0 else 0)
+        sys.exit(1 if failure else 0)
