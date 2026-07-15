@@ -87,6 +87,10 @@ class SectionPart:
     ordinal: int | None = None  # extracted number if present
 
 
+#: The one element ordinal the grammar has: ``paragraph 3``.
+_PARAGRAPH_RE = re.compile(r"^(?:paragraph|para)\s+(\d+)$", re.IGNORECASE)
+
+
 def parse_selector(selector: str) -> list[SectionPart]:
     """Parse a comma-separated sourceSection selector into parts.
 
@@ -111,14 +115,23 @@ def parse_selector(selector: str) -> list[SectionPart]:
             parts.append(SectionPart(kind="numbered", value=num_str))
             continue
 
-        # Lowercase start → element ordinal (paragraph N)
-        if raw[0].islower():
-            match = re.search(r"(\d+)", raw)
-            ordinal = int(match.group(1)) if match else None
-            parts.append(SectionPart(kind="paragraph", value=raw, ordinal=ordinal))
+        # Paragraph ordinal — spelled out, because it is the only element
+        # ordinal the grammar has and the only one `generate_selector` emits.
+        #
+        # This used to be "starts with a lowercase letter", which quietly ate
+        # every lowercase *heading*: `document.domain`, `fetch()`, `http2 push`
+        # — the house style of exactly the documents this targets. Worse, it
+        # then dug a number out of the title with `re.search(r"(\d+)")`, so
+        # `http2 push` meant *paragraph 2*, and a citation `add` had written
+        # itself was verified against an unrelated paragraph, silently. Also why
+        # `Section 7` worked and `section 7` did not.
+        match = _PARAGRAPH_RE.match(raw)
+        if match:
+            parts.append(SectionPart(kind="paragraph", value=raw,
+                                     ordinal=int(match.group(1))))
             continue
 
-        # Uppercase start → heading/section title
+        # Anything else → heading/section title
         match = re.search(r"(\d+|[IVXLCDM]+)\s*$", raw)
         ordinal = None
         if match:
@@ -176,12 +189,22 @@ def _title_prefix_number(title: str) -> str | None:
 def match_section(node: SectionNode, part: SectionPart) -> bool:
     """Check if a SectionNode matches a SectionPart selector."""
     if part.kind == "numbered":
-        # § 4.1 — match title starting with that number prefix
-        prefix = _title_prefix_number(node.title)
-        if prefix and prefix == part.value:
-            return True
-        # Also match if the number appears as the title prefix
-        return _normalize(node.title).startswith(part.value)
+        # § 4.1 — the section *numbered* 4.1, compared as a number and not as
+        # the characters it happens to be spelled with.
+        #
+        # This fell back to `node.title.startswith(part.value)`, a string test:
+        # "50. Security Considerations".startswith("5") is true, so `§ 5` in a
+        # document with no section 5 returned section 50's text — and because a
+        # match was *found*, strict mode never fired and nothing was reported.
+        # On RFC 2616, which has no § 13.1 heading, `§ 13.1` silently returned
+        # § 13.1.1, so a real quote from § 13.1.4 was declared absent from a
+        # document that contains it. Both lies the tool exists to prevent, from
+        # one line.
+        #
+        # An empty value ("§" with no number) names no section at all.
+        if not part.value:
+            return False
+        return _title_prefix_number(node.title) == part.value
 
     if part.kind == "heading":
         norm_title = _normalize(node.title)
@@ -353,7 +376,17 @@ def extract_by_selector(root: SectionNode, selector: str, *,
     """
     parts = parse_selector(selector)
     if not parts:
-        return root.all_text()
+        # A selector that parses to nothing — "§", ",", "   " — used to return
+        # `root.all_text()`: the *entire document*, offered as though it were the
+        # section that was asked for. Section scoping silently evaporated and
+        # every quote in the document passed. A selector we cannot understand is
+        # a miss, and never a licence to check against everything.
+        if strict:
+            raise SectionNotFound(
+                selector, [], len(section_labels(root)),
+                detail=f'cannot understand the section selector "{selector}"',
+            )
+        return ""
 
     current = root
 
@@ -536,7 +569,22 @@ def simplify_selector(root: SectionNode, selector: str, snippet: str) -> str:
 
 
 def locate_section(body: str, snippet: str, fmt) -> LocateResult | None:
-    """High-level: build section tree, generate a sourceSection selector."""
+    """High-level: build section tree, generate a sourceSection selector.
+
+    The selector returned is one that has been *proved* to lead back to the
+    snippet. ``simplify_selector`` always verified its candidates, but fell back
+    to ``generate_selector``'s output unverified — and that output is ambiguous
+    whenever two sections share a title, because a heading part matches the
+    first one in document order. So a snippet in the *second* "Introduction" was
+    given the selector ``Introduction, paragraph 1``, which resolves to the
+    first: ``add`` wrote a citation and ``check`` then verified it against a
+    different section's text, quietly.
+
+    When no faithful selector can be built — two same-titled sections at the
+    same level cannot be told apart in this grammar — we return None rather than
+    emit one that resolves elsewhere. A citation that cannot be addressed
+    honestly is better left unwritten than written wrong.
+    """
     if not hasattr(fmt, "sections"):
         return None
 
@@ -550,8 +598,13 @@ def locate_section(body: str, snippet: str, fmt) -> LocateResult | None:
 
     selector = simplify_selector(root, selector, snippet)
 
+    norm_snippet = _normalize(snippet)
+    extracted = extract_by_selector(root, selector)
+    if not extracted or norm_snippet not in _normalize(extracted):
+        return None
+
     return LocateResult(
         format_name="section",
         locator=selector,
-        matched_text=_normalize(snippet),
+        matched_text=norm_snippet,
     )

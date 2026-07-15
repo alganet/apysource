@@ -678,11 +678,32 @@ def test_parse_deep_numbered():
     assert parts[0].value == "3.2.1"
 
 
-def test_parse_paragraph_no_number():
+def test_parse_paragraph_needs_its_number():
+    """A bare "paragraph" is not an ordinal, so it is not read as one.
+
+    This asserted `kind == "paragraph", ordinal is None` — the old rule was
+    "starts with a lowercase letter", which swept in every lowercase *heading*
+    too (`document.domain`, `fetch()`, `http2 push`). Both readings end in a
+    miss for this input; the difference is that the new one does not also
+    misread real titles.
+    """
     parts = parse_selector("paragraph")
     assert len(parts) == 1
-    assert parts[0].kind == "paragraph"
-    assert parts[0].ordinal is None
+    assert parts[0].kind == "heading"
+
+
+def test_a_lowercase_heading_is_a_heading_not_a_paragraph_ordinal():
+    """`http2 push` used to mean "paragraph 2". It means the section called that."""
+    parts = parse_selector("http2 push")
+    assert parts[0].kind == "heading"
+    assert parts[0].value == "http2 push"
+
+    lower, upper = parse_selector("section 7"), parse_selector("Section 7")
+    assert lower[0].kind == upper[0].kind == "heading", \
+        "`section 7` used to parse as an ordinal while `Section 7` parsed as a title"
+
+    para = parse_selector("paragraph 3")
+    assert para[0].kind == "paragraph" and para[0].ordinal == 3
 
 
 def test_parse_adjacent_commas():
@@ -740,16 +761,25 @@ def test_extract_paragraph_zero():
     assert extract_by_selector(root, "Sec, paragraph 0") == ""
 
 
-def test_extract_empty_selector():
-    """Empty selector returns all text."""
+def test_a_selector_that_parses_to_nothing_is_a_miss_not_the_whole_document():
+    """This asserted the opposite, and the opposite was a false-pass generator.
+
+    `""`, `","`, `"   "` and `"§"` all parsed to zero parts and returned
+    `root.all_text()` — the entire document, handed back as though it were the
+    section that was asked for. Section scoping evaporated and every quote in
+    the document verified. "No locator at all" is a different question, and
+    `formats.extract_content` answers it before ever reaching here.
+    """
     root = SectionNode(title="", level=0, paragraphs=["Root text."],
                        children=[
                            SectionNode(title="A", level=1,
                                        paragraphs=["Child text."]),
                        ])
-    result = extract_by_selector(root, "")
-    assert "Root text." in result
-    assert "Child text." in result
+    for junk in ("", "   ", ",", "§", "§ "):
+        assert extract_by_selector(root, junk) == "", f"{junk!r} returned the document"
+
+    with pytest.raises(SectionNotFound):
+        extract_by_selector(root, ",", strict=True)
 
 
 def test_extract_section_with_only_children():
@@ -957,3 +987,83 @@ def test_a_numbered_miss_suggests_siblings_not_lookalikes():
     assert top.startswith("§ 1.")      # a sibling, not § 19.5
     assert caught.value.candidates.index("§ 1.4") < \
         caught.value.candidates.index("§ 19.5")
+
+
+# ── A selector names one section, and only the one it names ─────────────
+
+def test_a_section_number_is_a_number_not_a_string_prefix():
+    """`§ 5` returned section 50's text, because the match was `startswith`.
+
+    "50. Security Considerations".startswith("5") is true. And because a match
+    was *found*, strict mode never fired: the citation was checked against a
+    section the author had not named, with no error and no warning.
+    """
+    doc = ("# 1. Scope\nScope text.\n\n"
+           "# 3. Terms\nTerms text.\n\n"
+           "# 50. Security Considerations\nThis document has grave problems.\n")
+    md = MarkdownFormat()
+
+    assert "grave problems" in extract_section(doc, "§ 50", md, strict=True)
+
+    with pytest.raises(SectionNotFound):
+        extract_section(doc, "§ 5", md, strict=True)
+
+
+def test_a_real_rfc_section_that_does_not_exist_says_so():
+    """RFC 2616 jumps from § 13 to § 13.1.1 — there is no § 13.1 heading.
+
+    `§ 13.1` silently returned § 13.1.1, so a genuine quote from § 13.1.4 was
+    reported *absent from a document that contains it*, and a `§ 13.1` citation
+    was verified against § 13.1.1's text. Both directions of the lie, from one
+    line of code.
+    """
+    from pathlib import Path
+    body = (Path(__file__).parent / "fixtures" / "rfc2616.txt").read_text(
+        encoding="utf-8")
+    fmt = detect_format(body)
+
+    with pytest.raises(SectionNotFound):
+        extract_section(body, "§ 13.1", fmt, strict=True)
+
+    # The sections either side of the gap are real, and must still resolve.
+    assert extract_section(body, "§ 13.1.1", fmt, strict=True)
+    assert "Many user agents make it possible" in \
+        extract_section(body, "§ 13.1.4", fmt, strict=True)
+
+
+def test_add_never_writes_a_section_selector_check_would_misread():
+    """Two sections share a title; a heading part matches the first in the tree.
+
+    So a snippet in the *second* "Introduction" was given the selector
+    `Introduction, paragraph 1` — which resolves to the *first*. `add` wrote the
+    citation and `check` then verified it against a different section's text,
+    quietly. `locate` now proves its selector before returning it, and declines
+    rather than emit one that resolves elsewhere.
+    """
+    doc = ("# Introduction\nAlpha, the first introduction.\n\n"
+           "# Body\nSomething else.\n\n"
+           "# Introduction\nBeta, the second introduction, entirely different.\n")
+    md = MarkdownFormat()
+    snippet = "Beta, the second introduction, entirely different."
+
+    result = locate_section(doc, snippet, md)
+    if result is not None:
+        got = extract_by_selector(md.sections(doc), result.locator)
+        assert snippet in got, \
+            f"locate emitted {result.locator!r}, which check resolves elsewhere"
+
+
+def test_a_lowercase_heading_round_trips_through_add_and_check():
+    """`add` wrote `Guide, http2 push, paragraph 1`; `check` read paragraph 2 of
+    *Guide* — "Root paragraph two is about cats" — and reported no error at all.
+    """
+    doc = ("# Guide\nRoot paragraph one.\n\nRoot paragraph two is about cats.\n\n"
+           "## http2 push\nThe push mechanism sends resources proactively.\n")
+    md = MarkdownFormat()
+    snippet = "The push mechanism sends resources proactively."
+
+    result = locate_section(doc, snippet, md)
+    assert result is not None, "a lowercase heading must still be addressable"
+
+    got = extract_section(doc, result.locator, md, strict=True)
+    assert snippet in got, f"check resolved {result.locator!r} to: {got!r}"
