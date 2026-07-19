@@ -12,6 +12,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-19
+
 ### Fixed
 - **RFC page furniture and hyphen-wrapped tokens no longer leak into a citation.** Two
   things survive into the extracted text of a paginated RFC and cannot be quoted around:
@@ -326,7 +328,8 @@ All notable changes to this project are documented here. The format is based on
 - Baseline release captured at the time this changelog was introduced. Earlier history was not
   recorded in release notes; see the git log for prior commits.
 
-[Unreleased]: https://github.com/alganet/apysource/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/alganet/apysource/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/alganet/apysource/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/alganet/apysource/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/alganet/apysource/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/alganet/apysource/releases/tag/v0.3.1
