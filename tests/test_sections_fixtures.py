@@ -22,6 +22,7 @@ from apysource.formats import (
     WikitextFormat,
     detect_format,
     extract_content,
+    normalize_ws,
 )
 from apysource.sections import (
     SectionNotFound,
@@ -218,6 +219,24 @@ def test_rfc_no_trailing_dot_headings(rfc2616):
     titles = [c.title for c in root.children]
     intro = [t for t in titles if "Introduction" in t]
     assert len(intro) == 1
+
+
+def test_rfc_running_header_is_not_in_extracted_text(rfc2616):
+    """'RFC 2616  HTTP/1.1  June 1999' repeats on every page and is pagination,
+    not prose — it must not survive into the extracted text."""
+    text = normalize_ws(RfcTextFormat().text(rfc2616))
+    assert "RFC 2616 HTTP/1.1 June 1999" not in text
+
+
+def test_rfc_hyphenated_token_across_wrap_is_quotable(rfc2616):
+    """A hyphenated token the 72-column wrap splits can be quoted whole.
+
+    'ISO-8859-1' appears in the raw file wrapped as 'ISO-\\n   8859-1'; whitespace
+    collapsing alone would leave the unquotable 'ISO- 8859-1'.
+    """
+    text = normalize_ws(RfcTextFormat().text(rfc2616))
+    assert "ISO-8859-1" in text
+    assert "ISO- 8859-1" not in text
 
 
 # ══════════════════════════════════════════════════════════════════════

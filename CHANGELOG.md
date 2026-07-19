@@ -12,6 +12,19 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **RFC page furniture and hyphen-wrapped tokens no longer leak into a citation.** Two
+  things survive into the extracted text of a paginated RFC and cannot be quoted around:
+  - The **running page header** (`RFC 9110  HTTP Semantics  June 2022`), repeated on every
+    page, is now removed. It carries no `[Page N]` marker for the footer rule to catch, so
+    it is stripped keyed on the form feed it always follows — precise enough that a line of
+    body prose of the same shape is left untouched.
+  - A **token split across the 72-column wrap at a hyphen** (`ISO-\n   8859-1`; a field
+    name, an ABNF rule name, a literal GUID) read as `ISO- 8859-1` — a space the document
+    does not contain — and could not be cited whole. It is now rejoined to `ISO-8859-1`.
+    Only a single hyphen between two alphanumerics is joined, so a line ending `--` (an
+    em-dash) is left alone.
+
 ## [0.5.0] - 2026-07-14
 
 ### Added

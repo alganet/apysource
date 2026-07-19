@@ -14,6 +14,7 @@ from apysource.formats import (
     WikitextFormat,
     detect_format,
     extract_content,
+    normalize_ws,
 )
 from apysource.sections import (
     SectionNode,
@@ -620,6 +621,67 @@ Doe                      Standards Track                    [Page 1]
     sec1 = root.children[0]
     assert "First part" in sec1.paragraphs[0]
     assert "Second part" in sec1.paragraphs[1]
+
+
+def test_rfc_running_header_after_page_break_is_stripped():
+    """The running header — the line after a form feed — is furniture, not prose.
+
+    Real RFC layout: a footer, then the form feed on its own line, then the running
+    header ("RFC N   Title   Date"), then the page's content. The footer rule cannot
+    catch the header (it has no [Page N] marker), so it is removed keyed on the form
+    feed it follows.
+    """
+    rfc = (
+        "Request for Comments: 8888\n"
+        "\n"
+        "1.  Introduction\n"
+        "\n"
+        "   First part of the intro.\n"
+        "Doe                       Standards Track                    [Page 1]\n"
+        "\f\n"
+        "RFC 8888              A Sample Protocol            January 2026\n"
+        "\n"
+        "   Second part of the intro.\n"
+    )
+    text = RfcTextFormat().sections(rfc).children[0].all_text()
+    assert "First part" in text
+    assert "Second part" in text
+    assert "A Sample Protocol" not in text  # the running header is gone
+
+
+def test_rfc_hyphenated_token_across_a_wrap_is_rejoined():
+    """A token the 72-column wrap splits at a hyphen is quotable whole.
+
+    RFC text hyphenates only at hyphens already in the token, and the continuation is
+    indented to the paragraph, so `ISO-\\n   8859-1` must read as `ISO-8859-1`, not the
+    `ISO- 8859-1` that plain whitespace-collapsing would leave.
+    """
+    rfc = (
+        "Request for Comments: 8888\n"
+        "\n"
+        "1.  Introduction\n"
+        "\n"
+        "   The value is encoded with the ISO-\n"
+        "   8859-1 character set as described below.\n"
+    )
+    norm = normalize_ws(RfcTextFormat().sections(rfc).children[0].all_text())
+    assert "ISO-8859-1" in norm
+    assert "ISO- 8859-1" not in norm
+
+
+def test_rfc_double_hyphen_line_end_is_not_rejoined():
+    """A line ending in '--' (an em-dash) is left alone — only a single hyphen joins."""
+    rfc = (
+        "Request for Comments: 8888\n"
+        "\n"
+        "1.  Introduction\n"
+        "\n"
+        "   The request target --\n"
+        "   regardless of its form -- is normalised.\n"
+    )
+    norm = normalize_ws(RfcTextFormat().sections(rfc).children[0].all_text())
+    assert "-- regardless" in norm
+    assert "--regardless" not in norm
 
 
 def test_rfc_generate_section_selector():

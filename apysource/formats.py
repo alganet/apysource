@@ -564,11 +564,36 @@ class RfcTextFormat:
         return signals >= 2
 
     def _clean_body(self, body: str) -> str:
-        """Strip RFC page headers/footers and form feeds."""
-        # Remove form feeds
-        text = body.replace("\f", "")
-        # Remove page footer/header lines like "Author  ...  [Page N]"
+        r"""Strip RFC pagination furniture and repair tokens broken across a wrap.
+
+        Four steps, in order:
+
+        * The running **header** (``RFC 9110  Semantics  June 2022``) is the line right
+          after a page break, so it is removed keyed on the form feed it follows. Keying
+          on the ``\f`` is what keeps this from touching a line of body prose that merely
+          looks like a header — the same discipline the footer rule below cannot use,
+          because a footer's ``[Page N]`` marker is unambiguous on its own.
+        * Any stray form feed left over — a document may end on one with no line after it.
+        * The page **footer** (``Author  ...  [Page N]``), which sits *before* the break.
+        * A word split across the 72-column wrap **at a single hyphen** is rejoined
+          without a space. RFC text hyphenates only at hyphens already in the token — a
+          field name, an ABNF rule name, a charset like ``ISO-8859-1`` — so a wrap of
+          ``ISO-\n   8859-1`` otherwise reads as ``ISO- 8859-1`` and the token cannot be
+          quoted whole. The continuation is indented to the paragraph, so the newline and
+          that indent are both consumed, leaving ``ISO-8859-1``. Only a *single* hyphen
+          between two alphanumerics is joined, which leaves a line ending ``--`` (an
+          em-dash) alone; and because every heading is preceded by a blank line, no
+          heading is ever pulled up onto a hyphen above it.
+        """
+        # Running header: the line immediately after a form feed (removes both).
+        text = re.sub(r"\f\n[^\n]*\n", "\n", body)
+        # Any remaining form feed with no line of its own to carry a header.
+        text = text.replace("\f", "")
+        # Page footer, which is not adjacent to the break.
         text = re.sub(r"^.*\[Page \d+\]\s*$", "", text, flags=re.MULTILINE)
+        # Rejoin a token split at a single hyphen across a wrap (never "--"). The
+        # continuation is indented to its paragraph, so consume that indent too.
+        text = re.sub(r"(?<=[A-Za-z0-9])-\n[ \t]*(?=[A-Za-z0-9])", "-", text)
         return text
 
     def text(self, body: str) -> str:
