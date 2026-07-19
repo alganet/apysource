@@ -181,8 +181,14 @@ def _extract_title_number(title: str) -> int | None:
 
 
 def _title_prefix_number(title: str) -> str | None:
-    """Extract a leading dotted number prefix like '4.1' from a title."""
-    match = re.match(r"^(\d+(?:\.\d+)*)", title.strip())
+    """Extract a leading section designator like '4.1' — or an appendix's 'A' / 'A.1'.
+
+    An appendix heading is built as ``A. Pseudocode`` / ``A.1. Sample`` (a letter, an
+    optional dotted number, then the ``. `` the builder always inserts), so the
+    letter form is admitted **only when a period follows** it. That lookahead is what
+    keeps a plain heading such as ``Terminology`` from reporting a designator of ``T``.
+    """
+    match = re.match(r"^(\d+(?:\.\d+)*|[A-Z](?:\.\d+)*(?=\.))", title.strip())
     return match.group(1) if match else None
 
 

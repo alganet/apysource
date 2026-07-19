@@ -684,6 +684,34 @@ def test_rfc_double_hyphen_line_end_is_not_rejoined():
     assert "--regardless" not in norm
 
 
+def test_rfc_appendix_is_addressable_by_letter():
+    """`§ A` resolves to an appendix, and a plain heading is not mistaken for one.
+
+    The appendix node is built as `A. Pseudocode`; matching a `§` selector compares the
+    title's leading designator, which now admits an appendix letter. (`§ A.1` for an
+    appendix *subsection* needs the bare-`A.1.` heading to be recognised — that is a
+    separate change.)
+    """
+    rfc = (
+        "Request for Comments: 8888\n"
+        "\n"
+        "1.  Introduction\n"
+        "\n"
+        "   Intro text.\n"
+        "\n"
+        "Appendix A.  Pseudocode\n"
+        "\n"
+        "   The decoding routine is given here.\n"
+    )
+    fmt = RfcTextFormat()
+    assert "decoding routine" in fmt.extract(rfc, "§ A")
+    # The appendix now carries a § label, so it can be offered as a candidate.
+    labels = section_labels(fmt.sections(rfc))
+    assert "§ A" in labels
+    # A plain-word heading must never be read as a one-letter designator.
+    assert "§ I" not in labels and "§ P" not in labels
+
+
 def test_rfc_generate_section_selector():
     """Generated selectors use § with just the number prefix."""
     root = RfcTextFormat().sections(_RFC_SAMPLE)

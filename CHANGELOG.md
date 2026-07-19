@@ -24,6 +24,12 @@ All notable changes to this project are documented here. The format is based on
     does not contain — and could not be cited whole. It is now rejoined to `ISO-8859-1`.
     Only a single hyphen between two alphanumerics is joined, so a line ending `--` (an
     em-dash) is left alone.
+- **An appendix is addressable by its letter.** An `Appendix A.  Pseudocode` heading was
+  parsed into a node but could never be selected: `§ A` compares a title's leading
+  designator, and that was digits-only, so `A` matched nothing. The designator now admits
+  an appendix letter (`A`, `A.1`), but only when a period follows it — a plain heading
+  like `Terminology` is not mistaken for a designator `T`. Appendices consequently gain a
+  `§ A` label and can be offered as "did you mean" candidates.
 
 ## [0.5.0] - 2026-07-14
 
