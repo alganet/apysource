@@ -712,6 +712,93 @@ def test_rfc_appendix_is_addressable_by_letter():
     assert "§ I" not in labels and "§ P" not in labels
 
 
+def test_rfc_indented_old_style_heading_resolves():
+    """Pre-1990s RFCs indent headings and drop the period ('   2.1  Host Names').
+
+    The dotted, indented form is admitted as a fallback, so `§ 2.1` resolves where the
+    column-0 matcher would have found nothing.
+    """
+    rfc1123 = (
+        "Network Working Group\n"
+        "Request for Comments: 1123\n"
+        "\n"
+        "1.  INTRODUCTION\n"
+        "\n"
+        "   This document covers host requirements.\n"
+        "\n"
+        "   2.1  Host Names and Numbers\n"
+        "\n"
+        "   The syntax of a legal Internet host name was specified in RFC-952.\n"
+        "\n"
+        "   2.2  Using Domain Name Service\n"
+        "\n"
+        "   Host domain names MUST be translated into IP addresses using the DNS.\n"
+    )
+    fmt = RfcTextFormat()
+    assert "legal Internet host name" in fmt.extract(rfc1123, "§ 2.1")
+    assert "translated into IP addresses" in fmt.extract(rfc1123, "§ 2.2")
+
+
+def test_rfc_indented_numbered_list_is_not_promoted_to_a_heading():
+    """An indented *single*-number line is a list item, not a section — only a dotted
+    number is admitted, which is what tells a subsection from a step list."""
+    rfc = (
+        "Request for Comments: 8888\n"
+        "\n"
+        "1.  Introduction\n"
+        "\n"
+        "   The procedure has three steps:\n"
+        "\n"
+        "   1.  Open the connection.\n"
+        "\n"
+        "   2.  Send the request.\n"
+    )
+    labels = section_labels(RfcTextFormat().sections(rfc))
+    assert labels == ["§ 1"]  # the list items 1./2. did not become sections
+
+
+def test_rfc_indented_fallback_is_off_when_the_document_uses_column0_headings():
+    """A modern RFC keeps the indented fallback off, so an indented dotted line (an
+    example, an ABNF rule) is never mistaken for a section."""
+    rfc = (
+        "Request for Comments: 8888\n"
+        "\n"
+        "1.  Introduction\n"
+        "\n   Intro.\n\n"
+        "2.  Overview\n"
+        "\n   Overview.\n\n"
+        "3.  Details\n"
+        "\n   An example follows:\n\n"
+        "   2.1  the-rule = something   ; an indented example, not a heading\n"
+    )
+    labels = section_labels(RfcTextFormat().sections(rfc))
+    assert labels == ["§ 1", "§ 2", "§ 3"]
+
+
+def test_rfc_bare_appendix_subsection_resolves():
+    """RFC 9000 writes the appendix parent as 'Appendix A.  Pseudocode' but the child
+    as a bare 'A.1.  Sample ...' — recognised once its parent has been seen, so `§ A.1`
+    resolves (completing the pairing begun by the appendix-letter designator)."""
+    rfc9000 = (
+        "Request for Comments: 9000\n"
+        "\n"
+        "1.  Overview\n"
+        "\n"
+        "   QUIC is a transport protocol.\n"
+        "\n"
+        "Appendix A.  Pseudocode\n"
+        "\n"
+        "   The pseudocode below is non-normative.\n"
+        "\n"
+        "A.1.  Sample Variable-Length Integer Decoding\n"
+        "\n"
+        "   The following shows a sample decoding of a variable-length integer.\n"
+    )
+    fmt = RfcTextFormat()
+    assert "non-normative" in fmt.extract(rfc9000, "§ A")
+    assert "sample decoding" in fmt.extract(rfc9000, "§ A.1")
+
+
 def test_rfc_generate_section_selector():
     """Generated selectors use § with just the number prefix."""
     root = RfcTextFormat().sections(_RFC_SAMPLE)

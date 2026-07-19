@@ -536,6 +536,15 @@ class RfcTextFormat:
     # Appendix heading: "Appendix A.  Title" or "Appendix A Title"
     _APPENDIX_RE = re.compile(
         r"^Appendix\s+([A-Z](?:\.\d+)*)\.?\s+(\S.*)$", re.MULTILINE)
+    # Old-style indented heading ("   2.1  Host Names and Numbers"), as pre-1990s RFCs
+    # write them. Admitted only as a guarded fallback (see `sections`): a *dotted*
+    # number only, because a bare "1"/"2" at an indent is a numbered list item far more
+    # often than a heading — the dot is what tells a subsection from a list.
+    _INDENTED_SECTION_RE = re.compile(r"^[ \t]+(\d+(?:\.\d+)+)\.?[ \t]+(\S.*)$")
+    # A bare appendix subsection ("A.1.  Sample Decoding"), which carries no "Appendix"
+    # prefix. Recognised only once its "Appendix A" parent has been seen, so an "A.1."
+    # elsewhere cannot invent a section.
+    _APPENDIX_CHILD_RE = re.compile(r"^([A-Z](?:\.\d+)+)\.?[ \t]+(\S.*)$")
 
     def detect(self, body: str) -> bool:
         """Detect IETF RFC plain text by header markers and section numbering."""
@@ -639,6 +648,16 @@ class RfcTextFormat:
         current_paragraphs: list[str] = []
         current_block: list[str] = []
 
+        # The indented-heading fallback runs only for a document that does not already
+        # use column-0 headings — a modern RFC has hundreds and its numbered *lists*
+        # must never be promoted; an old-style (RFC 1123 era) RFC has essentially none.
+        indented_ok = len(self._SECTION_RE.findall(text)) < 3
+        # Appendix letters seen via "Appendix X", so a bare "X.1" child can be resolved.
+        appendix_letters: set[str] = set()
+        # Whether the previous line was blank — a heading is set off by one, a list item
+        # usually is not, which is the extra guard the indented fallback leans on.
+        prev_blank = True
+
         def _flush_block():
             t = _normalize("\n".join(current_block))
             if t:
@@ -646,10 +665,21 @@ class RfcTextFormat:
             current_block.clear()
 
         for line in text.split("\n"):
-            # Check for numbered section heading
+            # Column-0 numbered heading, then a full "Appendix X" heading.
             m = self._SECTION_RE.match(line)
-            if not m:
+            is_appendix = False
+            if m is None:
                 m = self._APPENDIX_RE.match(line)
+                is_appendix = m is not None
+            # A bare appendix subsection ("A.1  Title"), only under a seen "Appendix A".
+            if m is None and appendix_letters:
+                cm = self._APPENDIX_CHILD_RE.match(line)
+                if cm is not None and cm.group(1)[0] in appendix_letters:
+                    m = cm
+            # Old-style indented heading, only when the document invites it and the line
+            # is set off by a blank above.
+            if m is None and indented_ok and prev_blank:
+                m = self._INDENTED_SECTION_RE.match(line)
             if m:
                 _flush_block()
                 target = stack[-1][1] if stack else root
@@ -666,10 +696,15 @@ class RfcTextFormat:
                 parent = stack[-1][1] if stack else root
                 parent.children.append(node)
                 stack.append((level, node))
+                if is_appendix:
+                    appendix_letters.add(num)
+                prev_blank = False
             elif line.strip() == "":
                 _flush_block()
+                prev_blank = True
             else:
                 current_block.append(line)
+                prev_blank = False
 
         _flush_block()
         target = stack[-1][1] if stack else root

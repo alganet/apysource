@@ -30,6 +30,19 @@ All notable changes to this project are documented here. The format is based on
   an appendix letter (`A`, `A.1`), but only when a period follows it — a plain heading
   like `Terminology` is not mistaken for a designator `T`. Appendices consequently gain a
   `§ A` label and can be offered as "did you mean" candidates.
+- **Old-style indented headings are recognised.** Pre-1990s RFCs (RFC 1123 and its
+  generation) indent their headings and drop the trailing period — `   2.1  Host Names` —
+  so the column-0 matcher found nothing and `§ 2.1` resolved to no section. An indented
+  heading is now admitted as a guarded fallback: only a *dotted* number (a bare `1`/`2` at
+  an indent is a list item, not a heading), only when a blank line sets it off, and only in
+  a document that does not already use column-0 headings — so a modern RFC's numbered lists
+  and indented examples are never promoted.
+- **An appendix subsection with a bare heading resolves.** RFC 9000 writes the appendix
+  parent as `Appendix A.  Pseudocode` but the child as a bare `A.1.  Sample Decoding`,
+  matching neither the section nor the appendix pattern, so `§ A.1` found nothing. A bare
+  `A.1.` heading is now recognised — but only once its `Appendix A` parent has been seen,
+  so an `A.1.` elsewhere cannot invent a section. With the appendix-letter designator
+  above, `§ A.1` now resolves.
 
 ## [0.5.0] - 2026-07-14
 
