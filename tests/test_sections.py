@@ -757,9 +757,10 @@ def test_rfc_indented_numbered_list_is_not_promoted_to_a_heading():
     assert labels == ["§ 1"]  # the list items 1./2. did not become sections
 
 
-def test_rfc_indented_fallback_is_off_when_the_document_uses_column0_headings():
-    """A modern RFC keeps the indented fallback off, so an indented dotted line (an
-    example, an ABNF rule) is never mistaken for a section."""
+def test_rfc_indented_fallback_is_off_when_subsections_are_at_column_0():
+    """A modern RFC numbers its subsections at column 0, and there the indented fallback
+    stays off — an indented dotted line (an example, an ABNF rule) is never a section.
+    The tell is a column-0 *dotted* heading, not the mere presence of column-0 ones."""
     rfc = (
         "Request for Comments: 8888\n"
         "\n"
@@ -767,12 +768,36 @@ def test_rfc_indented_fallback_is_off_when_the_document_uses_column0_headings():
         "\n   Intro.\n\n"
         "2.  Overview\n"
         "\n   Overview.\n\n"
+        "2.1.  Scope\n"                       # a column-0 subsection: this doc is modern
+        "\n   A real subsection at the margin.\n\n"
         "3.  Details\n"
         "\n   An example follows:\n\n"
-        "   2.1  the-rule = something   ; an indented example, not a heading\n"
+        "   3.1  the-rule = something   ; an indented example, not a heading\n"
     )
     labels = section_labels(RfcTextFormat().sections(rfc))
-    assert labels == ["§ 1", "§ 2", "§ 3"]
+    assert "§ 2.1" in labels       # the column-0 subsection is real
+    assert "§ 3.1" not in labels   # the indented example is left alone
+
+
+def test_rfc_mixed_style_indented_subsections_resolve():
+    """RFC 1123's shape: several top-level headings at column 0, every subsection
+    indented. The *count* of column-0 headings must not switch the fallback off — the
+    absence of column-0 *dotted* headings is what marks the old style, and an earlier
+    count-based gate misjudged exactly this document."""
+    rfc = (
+        "Request for Comments: 1123\n"
+        "\n"
+        "1.  INTRODUCTION\n\n   Requirements for Internet hosts.\n\n"
+        "2.  GENERAL ISSUES\n\n"
+        "   2.1  Host Names and Numbers\n\n"
+        "   The restriction on the first character is relaxed to allow a digit.\n\n"
+        "3.  REMOTE LOGIN\n\n"
+        "   3.1  TELNET End-of-Line Convention\n\n"
+        "   The end-of-line sequence is the two-character CR LF.\n"
+    )
+    fmt = RfcTextFormat()
+    assert "first character is relaxed" in fmt.extract(rfc, "§ 2.1")
+    assert "two-character CR LF" in fmt.extract(rfc, "§ 3.1")
 
 
 def test_rfc_bare_appendix_subsection_resolves():

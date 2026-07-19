@@ -12,6 +12,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-19
+
+### Fixed
+- **Indented headings resolve in a mixed-style RFC, not only a purely indented one.**
+  0.5.1 gated the indented-heading fallback on there being *few* column-0 headings, which
+  misjudged the very document it named. RFC 1123 keeps its top-level headings at column 0
+  (`1.`–`7.`) but indents every subsection (`   2.1  Host Names`), so the gate saw eight
+  column-0 headings, stayed off, and `§ 2.1` still resolved to nothing. The gate now keys
+  on the absence of a column-0 *dotted* heading — a modern RFC numbers its subsections at
+  the margin (`8.1`, `10.4.18`), an old-style one never does — so RFC 1123's indented
+  subsections resolve while a modern RFC's indented examples are still left alone.
+
 ## [0.5.1] - 2026-07-19
 
 ### Fixed
@@ -328,7 +340,8 @@ All notable changes to this project are documented here. The format is based on
 - Baseline release captured at the time this changelog was introduced. Earlier history was not
   recorded in release notes; see the git log for prior commits.
 
-[Unreleased]: https://github.com/alganet/apysource/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/alganet/apysource/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/alganet/apysource/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/alganet/apysource/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/alganet/apysource/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/alganet/apysource/compare/v0.3.1...v0.4.0

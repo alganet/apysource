@@ -648,10 +648,16 @@ class RfcTextFormat:
         current_paragraphs: list[str] = []
         current_block: list[str] = []
 
-        # The indented-heading fallback runs only for a document that does not already
-        # use column-0 headings — a modern RFC has hundreds and its numbered *lists*
-        # must never be promoted; an old-style (RFC 1123 era) RFC has essentially none.
-        indented_ok = len(self._SECTION_RE.findall(text)) < 3
+        # The indented-heading fallback runs only for a document whose subsections are
+        # not already at column 0. A modern RFC numbers its subsections there (8.1,
+        # 10.4.18), so an indented dotted line is an example or an ABNF rule, never a
+        # heading; an old-style RFC (RFC 1123 and its generation) keeps its top-level
+        # headings at column 0 but indents every subsection, so it has *no* column-0
+        # dotted heading at all. The presence of a column-0 *dotted* heading — not the
+        # count of column-0 headings, which misjudged the mixed RFC 1123 shape — is what
+        # says "subsections live at the margin here, leave the indented ones alone".
+        indented_ok = not any(
+            "." in m.group(1) for m in self._SECTION_RE.finditer(text))
         # Appendix letters seen via "Appendix X", so a bare "X.1" child can be resolved.
         appendix_letters: set[str] = set()
         # Whether the previous line was blank — a heading is set off by one, a list item
