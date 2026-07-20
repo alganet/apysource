@@ -12,6 +12,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-20
+
 ### Added
 - **`check --workers N` fetches several documents at once.** The polite delay is now
   enforced *per host*, so this parallelises a run across the sites it cites and never
