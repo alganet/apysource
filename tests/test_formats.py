@@ -347,3 +347,83 @@ def test_a_flat_text_file_does_not_invent_a_title():
 def test_an_html_page_is_titled_by_its_title_tag():
     page = "<html><head><title>Fetch Standard</title></head><body><h1>1. Scope</h1></body></html>"
     assert HtmlFormat().title(page) == "Fetch Standard"
+
+
+from apysource.documents import _SoupCache  # noqa: E402
+
+
+class TestASharedParseIsStillEveryonesOwnAnswer:
+    """A cached HTML tree is handed to several callers. That is only safe if
+    nobody mutates it, and nothing about BeautifulSoup guarantees that — it is
+    an invariant of *this* code, so it is asserted here rather than assumed.
+    """
+
+    HTML = (
+        "<html><head><title>T</title></head><body>"
+        "<h2 id='one'>One</h2><p>first paragraph text</p>"
+        "<h2 id='two'>Two</h2><p>second paragraph text</p>"
+        "<div class='side'>aside text</div>"
+        "</body></html>"
+    )
+
+    def test_extracting_twice_gives_the_same_text(self):
+        shared = HtmlFormat(soup_cache=_SoupCache(4))
+        first = shared.extract(self.HTML, "div.side")
+        second = shared.extract(self.HTML, "div.side")
+
+        assert first == second
+
+    def test_two_selectors_do_not_disturb_each_other(self):
+        """Whichever order they are asked in, each gets its own answer."""
+        cache = _SoupCache(4)
+        forwards = HtmlFormat(soup_cache=cache)
+        a1 = forwards.extract(self.HTML, "div.side")
+        b1 = forwards.extract(self.HTML, "p")
+
+        backwards = HtmlFormat(soup_cache=_SoupCache(4))
+        b2 = backwards.extract(self.HTML, "p")
+        a2 = backwards.extract(self.HTML, "div.side")
+
+        assert (a1, b1) == (a2, b2)
+
+    def test_a_shared_parse_matches_an_unshared_one(self):
+        """The cache must not be able to change an answer, only its cost."""
+        shared = HtmlFormat(soup_cache=_SoupCache(4))
+        fresh = HtmlFormat()
+
+        for locator in ("div.side", "p", "h2"):
+            assert shared.extract(self.HTML, locator) == fresh.extract(self.HTML, locator)
+
+        assert shared.text(self.HTML) == fresh.text(self.HTML)
+        assert shared.title(self.HTML) == fresh.title(self.HTML)
+
+    def test_the_document_is_parsed_once(self):
+        cache = _SoupCache(4)
+        fmt = HtmlFormat(soup_cache=cache)
+
+        fmt.extract(self.HTML, "div.side")
+        fmt.extract(self.HTML, "p")
+        fmt.text(self.HTML)
+        fmt.title(self.HTML)
+
+        assert len(cache) == 1, "one document, one tree"
+
+    def test_the_cache_does_not_grow_without_bound(self):
+        """A tree is several times the size of its source, so the window is
+        small and fixed. Citations of one page arrive together, which is what
+        makes a small window enough."""
+        from apysource.documents import SOUP_CACHE_DOCUMENTS, DocumentCache
+
+        cache = DocumentCache()
+        html = cache.formats[0]
+        for i in range(SOUP_CACHE_DOCUMENTS * 3):
+            html.text(f"<html><body><p>document {i}</p></body></html>")
+
+        assert len(cache._soups) <= SOUP_CACHE_DOCUMENTS
+
+    def test_the_module_default_shares_nothing(self):
+        """`DEFAULT_FORMATS` is process-wide, so it must retain no documents —
+        otherwise one run's parse could answer the next run's question."""
+        from apysource.formats import DEFAULT_FORMATS
+
+        assert DEFAULT_FORMATS[0]._soup_cache is None

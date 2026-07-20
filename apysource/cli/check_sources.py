@@ -11,6 +11,7 @@ from pathlib import Path
 from rdflib import Graph
 
 from apysource.api import check_graph
+from apysource.documents import DEFAULT_MAX_BYTES
 from apysource.cli._base import CLIContext, UsageError, pop_flag, pop_value
 from apysource.graph import load_triples
 from apysource.http import CachedFetcher
@@ -35,17 +36,21 @@ class CheckSourcesCommand:
     #: first positional argument (see ``cli.__main__``).
     accepts_graph = True
 
-    #: Flags whose next argument is a value (see ``cli.__main__``). Both of these
+    #: Flags whose next argument is a value (see ``cli.__main__``). The first two
     #: take a `.ttl`, so without this `check --provenance run.ttl sources.yaml`
     #: loaded `run.ttl` as the graph to check and wrote provenance over
-    #: `sources.yaml`.
-    value_flags = ("--format", "--provenance")
+    #: `sources.yaml`. `--workers` is here for the same reason and a blunter one:
+    #: `check --workers 8 sources.yaml` would otherwise try to load `8` as the
+    #: graph.
+    value_flags = ("--format", "--provenance", "--workers")
 
     def __init__(self, ctx: CLIContext, registry: RepoRegistry,
-                 fetcher: CachedFetcher | None = None) -> None:
+                 fetcher: CachedFetcher | None = None,
+                 document_cache_bytes: int = DEFAULT_MAX_BYTES) -> None:
         self.ctx = ctx
         self.registry = registry
         self.fetcher = fetcher
+        self.document_cache_bytes = int(document_cache_bytes)
 
     def run(self, graph: Graph | None = None, args: list[str] | None = None,
             vetted: bool = False) -> None:
@@ -71,9 +76,34 @@ class CheckSourcesCommand:
         try:
             fmt, args = pop_value(args, "--format")
             prov, args = pop_value(args, "--provenance")
+            workers, args = pop_value(args, "--workers")
         except UsageError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
+
+        # How many documents may be in flight. The polite delay is enforced per
+        # host, so this parallelises a run across the sites it cites and never
+        # within one of them.
+        if workers is not None:
+            try:
+                count = int(workers)
+            except ValueError:
+                print(f"Error: --workers takes a number, not {workers!r}",
+                      file=sys.stderr)
+                sys.exit(1)
+            if count < 1:
+                print("Error: --workers must be at least 1", file=sys.stderr)
+                sys.exit(1)
+            if self.fetcher is None:
+                # Having bothered to reject `--workers 0` and `--workers abc`,
+                # accepting a good value and quietly dropping it is the one
+                # outcome that leaves the user with nothing to go on — they wait
+                # out a serial run believing it is parallel.
+                print("Error: --workers needs an HTTP client, and this "
+                      "configuration has none. Sources served entirely by repos "
+                      "are crawled through those instead.", file=sys.stderr)
+                sys.exit(1)
+            self.fetcher.workers = count
 
         if fmt is not None and fmt != "json":
             print(f"Error: unknown --format {fmt!r} (only 'json')", file=sys.stderr)
@@ -108,7 +138,8 @@ class CheckSourcesCommand:
                               emit_provenance=emit_prov, force=force,
                               strict_redirects=strict_redirects,
                               strict_repos=strict_repos, crawl=not no_crawl,
-                              validate_shapes=check_shapes)
+                              validate_shapes=check_shapes,
+                              document_cache_bytes=self.document_cache_bytes)
 
         prov_graph = None
         if isinstance(results, tuple):

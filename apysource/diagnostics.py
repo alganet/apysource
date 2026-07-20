@@ -179,17 +179,26 @@ def _best_window(snippet: list[str], source: list[str]) -> list[str] | None:
 
     ``quick_ratio`` is an upper bound on ``ratio`` and far cheaper, so it
     screens every window and only the best few are scored properly.
+
+    The source is folded **once**, up front, and the windows are slices of the
+    folded array. Folding each window instead meant every word of the document
+    was folded about four times over (the windows are ``width`` wide and step
+    ``width // 4``), which on a long document is most of the work this function
+    does. Slicing is equivalent because ``_fold_all`` is positionwise — it reads
+    one word and knows nothing of its neighbours — so the fold of a slice and a
+    slice of the fold are the same list.
     """
     width = len(snippet)
     step = max(1, width // 4)
+
+    source_keys = _keys(source)
 
     matcher = SequenceMatcher(autojunk=False)
     matcher.set_seq2(_keys(snippet))
 
     scored: list[tuple[float, int]] = []
     for start in range(0, max(1, len(source) - width + 1), step):
-        window = source[start:start + width]
-        matcher.set_seq1(_keys(window))
+        matcher.set_seq1(source_keys[start:start + width])
         scored.append((matcher.quick_ratio(), start))
 
     scored.sort(key=lambda pair: -pair[0])

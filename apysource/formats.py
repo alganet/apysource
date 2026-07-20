@@ -10,7 +10,7 @@ Dispatch functions select the right adapter by name or auto-detection.
 
 import re
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Callable, Protocol
 
 
 @dataclass
@@ -191,19 +191,59 @@ def html_text(node) -> str:
     return "".join(out)
 
 
+class SoupCache(Protocol):
+    """What ``HtmlFormat`` needs of a parse cache, and nothing more.
+
+    Stated as a protocol because a plain ``dict`` very nearly fits and is
+    silently wrong: ``dict.get(body, produce)`` returns the *callable* as its
+    default rather than calling it, so every lookup would hand back a function
+    where a parse tree was expected. One method, named for what it does.
+    """
+
+    def get(self, body: str, produce: Callable[[], Any]) -> Any:
+        """The parse of ``body``, computing it with ``produce`` on a miss."""
+        ...
+
+
+def looks_like_html(body: str) -> bool:
+    """Does this document open like HTML?
+
+    A free function because three other formats ask it before claiming a body —
+    Markdown, Wikitext and RFC text all reject HTML first. Each of them used to
+    construct a throwaway ``HtmlFormat()`` to ask, once per detection, on a path
+    that runs for every extraction. A format instance is not what the question
+    needs, and building one per call quietly ties the answer to whatever state
+    the class may grow later.
+    """
+    head = body[:1000].lstrip().lower()
+    if head[:9].startswith("<!doctype") or head[:5].startswith("<html"):
+        return True
+    return "<head" in head or "<body" in head
+
+
 class HtmlFormat:
-    """HTML content format — CSS selectors for extraction and location."""
+    """HTML content format — CSS selectors for extraction and location.
+
+    ``soup_cache`` is an optional memo with a ``get(body, produce)`` method (see
+    ``documents._SoupCache``). When one is given, a document is parsed once
+    however many selectors are asked of it; when it is ``None`` — the default,
+    and what the module-level ``DEFAULT_FORMATS`` uses — nothing is retained and
+    behaviour is exactly as before.
+
+    It is a constructor argument and not a module-level memo on purpose. The
+    parse is retained for the length of whatever owns the cache, and a global one
+    would be owned by the process: a second check in the same interpreter could
+    then be answered from a tree built before the change it was looking for.
+    """
 
     name = "html"
     mime_type = "text/html"
 
+    def __init__(self, soup_cache: SoupCache | None = None) -> None:
+        self._soup_cache = soup_cache
+
     def detect(self, body: str) -> bool:
-        head = body[:1000].lstrip()
-        if head[:9].lower().startswith("<!doctype") or head[:5].lower().startswith("<html"):
-            return True
-        if "<head" in head.lower() or "<body" in head.lower():
-            return True
-        return False
+        return looks_like_html(body)
 
     def _soup(self, body: str):
         """Parse once, the same way for every entry point.
@@ -211,9 +251,22 @@ class HtmlFormat:
         `sections`, `extract`, `locate` and `text` all read the document through
         this, so a selector that `locate` mints is a selector `extract` can
         honour. They used to parse and render the page three different ways.
+
+        "Once" was true of *how* and not of *how often*: this said parse once and
+        then parsed on every call. A page carrying five citations was five trees,
+        identical and built from the same string. With a cache it is one.
+
+        Everything downstream only ever reads the tree — ``html_text`` walks
+        ``.children``, the selector helpers walk ``.parent`` — so handing the same
+        tree to two callers is safe. ``test_formats`` asserts that directly,
+        because it is an invariant of this sharing rather than of BeautifulSoup.
         """
         from bs4 import BeautifulSoup
-        return BeautifulSoup(body, "html.parser")
+
+        if self._soup_cache is None:
+            return BeautifulSoup(body, "html.parser")
+
+        return self._soup_cache.get(body, lambda: BeautifulSoup(body, "html.parser"))
 
     def _content(self, body: str):
         """The part of the parse a reader actually sees."""
@@ -349,7 +402,7 @@ class MarkdownFormat:
     def detect(self, body: str) -> bool:
         """Detect Markdown by ATX headings (``# Title``), not HTML structure."""
         # Reject if it looks like HTML
-        if HtmlFormat().detect(body):
+        if looks_like_html(body):
             return False
         # Require at least one ATX heading
         return bool(re.search(r"^#{1,6}\s", body, re.MULTILINE))
@@ -448,7 +501,7 @@ class WikitextFormat:
         """Detect Wikitext by ``==Heading==`` patterns or wiki markup."""
         head = body[:2000]
         # Reject if it looks like HTML
-        if HtmlFormat().detect(body):
+        if looks_like_html(body):
             return False
         # Wikitext headings: == Title ==
         if re.search(r"^={2,6}[^=]", body, re.MULTILINE):
@@ -549,7 +602,7 @@ class RfcTextFormat:
     def detect(self, body: str) -> bool:
         """Detect IETF RFC plain text by header markers and section numbering."""
         # Reject HTML
-        if HtmlFormat().detect(body):
+        if looks_like_html(body):
             return False
         head = body[:3000]
         signals = 0
@@ -811,10 +864,20 @@ class PlainTextFormat:
 
 # ── Dispatch ────────────────────────────────────────────────────────────
 
-DEFAULT_FORMATS: list[ContentFormat] = [
-    HtmlFormat(), MarkdownFormat(), WikitextFormat(), RfcTextFormat(),
-    PlainTextFormat(),
-]
+def default_formats(soup_cache: SoupCache | None = None) -> list[ContentFormat]:
+    """A fresh set of format adapters, optionally sharing one HTML parse.
+
+    The module-level ``DEFAULT_FORMATS`` below is this with no cache, and stays
+    the default everywhere — a caller that wants parses shared has to own the
+    cache and say so, which is what keeps one run's trees out of the next one's.
+    """
+    return [
+        HtmlFormat(soup_cache=soup_cache), MarkdownFormat(), WikitextFormat(),
+        RfcTextFormat(), PlainTextFormat(),
+    ]
+
+
+DEFAULT_FORMATS: list[ContentFormat] = default_formats()
 
 
 def _find_format(name: str, formats: list[ContentFormat]) -> ContentFormat | None:

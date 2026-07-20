@@ -17,6 +17,7 @@ from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS, RDF, XSD
 
 from apysource.diagnostics import diagnose, render
+from apysource.documents import DEFAULT_MAX_BYTES, DocumentCache
 from apysource.formats import normalize_ws
 from apysource.graph import local_name
 from apysource.namespaces import PROV, SV
@@ -25,6 +26,7 @@ from apysource.resolution import (
     _get_snippet,
     _get_source,
     load_text,
+    prefetch,
     resolve_chain,
     resolve_direct,
 )
@@ -315,7 +317,7 @@ def run_checks(
     g: Graph, checks_config: list[dict[str, Any]], registry: RepoRegistry,
     fetcher: Any = None, emit_provenance: bool = False, force: bool = False,
     strict_redirects: bool = False, strict_repos: bool = False,
-    crawl: bool = True,
+    crawl: bool = True, document_cache_bytes: int = DEFAULT_MAX_BYTES,
 ) -> list[CheckResult] | tuple[list[CheckResult], Graph]:
     """Run all checks, return structured results.
 
@@ -332,6 +334,11 @@ def run_checks(
     resolved_sources: list[Any] = []
     prov_graph = Graph() if emit_provenance else None
     activity = None
+
+    # One per run, and it dies with the run. Citations cluster on documents —
+    # a sources file for one specification is dozens of fragments of one page —
+    # so this is where the cost of checking a large collection actually goes.
+    cache = DocumentCache(max_bytes=document_cache_bytes)
 
     if emit_provenance and prov_graph is not None:
         from apysource.namespaces import bind_prefixes
@@ -358,7 +365,7 @@ def run_checks(
             chain_results, chain_resolved = _run_chain_checks(
                 g, entities, name, registry, fetcher=fetcher,
                 prov_graph=prov_graph, activity=activity, force=force,
-                crawl=crawl)
+                crawl=crawl, cache=cache)
             results.extend(chain_results)
             resolved_sources.extend(chain_resolved)
 
@@ -376,7 +383,7 @@ def run_checks(
                     continue
 
                 outcome = load_text(result, max_chars=None, force=force,
-                                    crawl=crawl)
+                                    crawl=crawl, cache=cache)
                 clean = normalize_ws(outcome.text) if outcome.text else ""
 
                 # A Term need not quote anything — the shapes ask only for a URL
@@ -388,10 +395,14 @@ def run_checks(
                 if term_snippet and len(clean) >= MIN_EXTRACT_CHARS:
                     quote = re.sub(r"(\.\.\.|…)$", "",
                                    normalize_ws(term_snippet)).strip()
-                    if quote and quote not in normalize_ws(outcome.text):
+                    # `clean` is already `normalize_ws(outcome.text)`. This
+                    # normalized the same document twice more — once to search
+                    # and once to diagnose — which on a large source is a full
+                    # extra copy of it per term, for a string we are holding.
+                    if quote and quote not in clean:
                         fail_list.append(_failure(
                             result, entity, "snippet not found in extracted content",
-                            diagnose(quote, normalize_ws(outcome.text)),
+                            diagnose(quote, clean),
                         ))
                         continue
 
@@ -438,6 +449,7 @@ def _run_chain_checks(
     registry: RepoRegistry, fetcher: Any = None,
     prov_graph: Graph | None = None, activity: BNode | None = None,
     force: bool = False, crawl: bool = True,
+    cache: DocumentCache | None = None,
 ) -> tuple[list[CheckResult], list[Any]]:
     """Run the three chain-mode checks: cache resolution, content extraction,
     and snippet verification.
@@ -450,6 +462,15 @@ def _run_chain_checks(
     # Resolve all fragments once
     resolved = {frag: resolve_chain(g, frag, registry, fetcher=fetcher)
                 for frag in fragments}
+
+    # Warm the caches, several documents at a time. Resolution is complete, so
+    # nothing below reads the graph from a worker; and because this only fills
+    # caches the serial code already consults, every list built after it is
+    # still built in fragment order, on this thread.
+    if cache is not None:
+        prefetch(resolved.values(), cache=cache,
+                 workers=getattr(fetcher, "workers", 1),
+                 force=force, crawl=crawl)
 
     # CHECK: Cache resolution
     cache_ok = []
@@ -467,6 +488,11 @@ def _run_chain_checks(
                               len(cache_ok), len(fragments), cache_fail))
 
     # CHECK: Content extraction
+    #: The document each fragment was checked against, and its normalized form.
+    #: Loading is where the whole cost of a run is, so it happens once per
+    #: fragment and both checks read the result.
+    loaded: dict[URIRef, Any] = {}
+    normalized: dict[URIRef, str] = {}
     extract_ok = []
     extract_fail = []
     for frag in fragments:
@@ -476,10 +502,24 @@ def _run_chain_checks(
             extract_fail.append(_failure(result, frag, f'"{loc}" -> no cache'))
             continue
 
-        # Force a refresh (re-fetch, and re-crawl) during the extraction phase
-        # only; the snippet phase below reads the now-fresh caches, so each
-        # source is fetched at most once per run.
-        outcome = load_text(result, max_chars=50000, force=force, crawl=crawl)
+        # The whole document, once, and kept — the snippet phase below reads
+        # this rather than loading it again.
+        #
+        # It used to read the first 50 000 characters here and the whole thing
+        # there, which meant two loads, two extractions and two parses of one
+        # document per fragment. The cap bought nothing even then: this check
+        # only asks whether the extraction is long enough to be worth matching
+        # against, and `len(normalize_ws(...))` cannot shrink when more of the
+        # document is read.
+        #
+        # It did change one answer, and for the worse. `truncate` announces a
+        # cut with "... [N more chars]", which is itself about twenty
+        # characters — so a document over 50 000 characters of pure whitespace
+        # passed this check on the strength of the marker saying it had been
+        # truncated. Reading all of it fails, which is the right answer.
+        outcome = load_text(result, max_chars=None, force=force, crawl=crawl,
+                            cache=cache)
+        loaded[frag] = outcome
         # The same text the snippet check will match against. This ran through
         # `strip_headers`, which drops every line beginning with `#` — every ATX
         # heading in every Markdown document — so this check called a document
@@ -488,6 +528,7 @@ def _run_chain_checks(
         # siding with the wrong one: the fragment the report FAILED was written
         # out as `verificationStatus "verified"`.
         clean = normalize_ws(outcome.text)
+        normalized[frag] = clean
 
         if len(clean) < MIN_EXTRACT_CHARS:
             loc = str(g.value(frag, SV.sourceLocation) or "")
@@ -575,19 +616,23 @@ def _run_chain_checks(
         # linear, and diagnosing a miss across the whole of RFC 9110 takes a
         # tenth of a second.
         #
-        # No force here: the extraction phase above already refreshed and
-        # re-crawled, so this reads the warm cache.
-        loaded = load_text(result, max_chars=None, crawl=crawl)
-        if loaded.status != "ok":
+        # The extraction phase above loaded exactly this, refreshing and
+        # re-crawling as asked, and it kept both the outcome and the normalized
+        # text. Loading it a second time re-read the file and re-parsed it — for
+        # HTML, a second full BeautifulSoup tree per fragment — to arrive at the
+        # string already in hand. The implicit "the phase above warmed the cache
+        # for me" coupling is now an explicit handover.
+        outcome = loaded[frag]
+        if outcome.status != "ok":
             # The source never arrived. Running the snippet against the empty
             # string would report "snippet not found" — blaming the quote for
             # a page that was missing or a fetch that failed.
             snippet_fail.append(
-                _failure(result, frag, loaded.reason or "source unavailable"))
+                _failure(result, frag, outcome.reason or "source unavailable"))
             _record_verdict(prov_graph, activity, g, frag, "failed")
             continue
 
-        norm_source = normalize_ws(loaded.text)
+        norm_source = normalized[frag]
 
         if norm_snippet and norm_snippet in norm_source:
             snippet_ok.append(frag)

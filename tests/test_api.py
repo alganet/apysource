@@ -111,3 +111,58 @@ def test_omitting_a_fetcher_is_not_the_same_as_passing_none():
         with patch("apysource.api.run_checks", return_value=[]) as run:
             check_graph(g, registry=EMPTY_REGISTRY)
     assert run.call_args.kwargs["fetcher"] is sentinel
+
+
+class TestTheDocumentCacheBudgetIsReachable:
+    """A configuration knob nobody reads is worse than no knob.
+
+    `default_document_cache_bytes` sat in defaults.toml, was documented in the
+    README as the way to bound what a run holds, and reached nothing: the
+    parameter existed on `run_checks` and no caller passed it. Setting it
+    changed nothing, and there was no way to find that out except by reading
+    the source. These assert the whole path is connected.
+    """
+
+    def test_check_graph_forwards_the_budget(self):
+        from apysource import graph_from_data
+        from apysource.api import check_graph
+        from tests.conftest import EMPTY_REGISTRY, MockFetcher
+
+        seen = {}
+        import apysource.api as api
+        real = api.run_checks
+
+        def spy(*args, **kwargs):
+            seen["bytes"] = kwargs.get("document_cache_bytes")
+            return real(*args, **kwargs)
+
+        api.run_checks = spy
+        try:
+            g = graph_from_data({"sources": [{
+                "label": "s", "url": "https://example.com/a",
+                "fragments": [{"label": "f", "snippet": "x" * 40}],
+            }]})
+            check_graph(g, registry=EMPTY_REGISTRY, fetcher=MockFetcher(),
+                        document_cache_bytes=1234)
+        finally:
+            api.run_checks = real
+
+        assert seen["bytes"] == 1234
+
+    def test_the_wiring_supplies_it_to_the_check_command(self):
+        """The shipped default reaches the command that runs a check."""
+        from apysource._defaults import compiled
+
+        command = compiled.check_sources_cmd()
+
+        assert command.document_cache_bytes > 0
+
+    def test_the_budget_is_actually_applied_to_the_cache(self):
+        """Not merely passed along — it has to bound something."""
+        from apysource.documents import DocumentCache
+
+        cache = DocumentCache(max_bytes=2000)
+        for i in range(50):
+            cache.body(f"doc{i}", lambda: "x" * 500)
+
+        assert cache.stored_bytes <= 2000

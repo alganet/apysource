@@ -10,6 +10,7 @@ No config imports — all values received as parameters.
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -117,6 +118,9 @@ class BaseRepo:
         self.crawl_delay = crawl_delay
 
         self._crawls: dict[str, CrawlOutcome] = {}
+        #: One lock per key, created on demand behind this guard. See `_key_lock`.
+        self._locks: dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
 
     @property
     def cache_root(self) -> Path:
@@ -216,29 +220,49 @@ class BaseRepo:
             raise RepoUnavailable(self.NAME, key, f"{url} returned {status}")
         raise RepoUnavailable(self.NAME, key, f"{url} could not be reached")
 
+    def _key_lock(self, key: str) -> threading.Lock:
+        """One lock per key, not one per repo.
+
+        A single repo-wide lock would put every Gutenberg crawl behind whichever
+        one is slowest, which is precisely the serialization the workers exist to
+        avoid. Per key, two different books crawl at once and two citations of
+        one book still produce one crawl.
+        """
+        with self._locks_guard:
+            lock = self._locks.get(key)
+            if lock is None:
+                lock = self._locks[key] = threading.Lock()
+            return lock
+
     def ensure(self, key: str, *, force: bool = False) -> None:
         """Crawl ``key`` at most once per run, replaying the same outcome.
 
         Twenty fragments citing one missing page must produce one request and
         twenty identical failures — not twenty requests, and not one failure
         followed by nineteen different ones.
+
+        The check and the crawl are done under a per-key lock, because with
+        workers they are no longer one step: two threads could both find no
+        outcome recorded and both go and fetch, which is the duplicate request
+        this method exists to prevent.
         """
-        if not force and key in self._crawls:
-            outcome = self._crawls[key]
-            if outcome.status == "not_found":
-                raise RepoNotFound(self.NAME, key, outcome.reason)
-            if outcome.status == "unavailable":
-                raise RepoUnavailable(self.NAME, key, outcome.reason)
-            return
+        with self._key_lock(key):
+            if not force and key in self._crawls:
+                outcome = self._crawls[key]
+                if outcome.status == "not_found":
+                    raise RepoNotFound(self.NAME, key, outcome.reason)
+                if outcome.status == "unavailable":
+                    raise RepoUnavailable(self.NAME, key, outcome.reason)
+                return
 
-        try:
-            self.crawl(key, delay=self.crawl_delay, force=force)
-        except RepoError as e:
-            status = "not_found" if isinstance(e, RepoNotFound) else "unavailable"
-            self._crawls[key] = CrawlOutcome(self.NAME, key, status, e.reason)
-            raise
+            try:
+                self.crawl(key, delay=self.crawl_delay, force=force)
+            except RepoError as e:
+                status = "not_found" if isinstance(e, RepoNotFound) else "unavailable"
+                self._crawls[key] = CrawlOutcome(self.NAME, key, status, e.reason)
+                raise
 
-        self._crawls[key] = CrawlOutcome(self.NAME, key, "ok")
+            self._crawls[key] = CrawlOutcome(self.NAME, key, "ok")
 
     def crawl_outcome(self, key: str) -> CrawlOutcome | None:
         """What happened when this key was crawled, or None if it never was.

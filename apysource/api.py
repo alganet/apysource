@@ -19,6 +19,7 @@ from typing import Any
 
 from rdflib import Graph
 
+from apysource.documents import DEFAULT_MAX_BYTES
 from apysource.namespaces import SV
 from apysource.results import CheckResult, Failure
 from apysource.verification import run_checks
@@ -64,6 +65,7 @@ def check_graph(
     crawl: bool = True,
     emit_provenance: bool = False,
     validate_shapes: bool = False,
+    document_cache_bytes: int = DEFAULT_MAX_BYTES,
 ) -> list[CheckResult] | tuple[list[CheckResult], Graph]:
     """Run the standard checks against a sources graph.
 
@@ -78,6 +80,11 @@ def check_graph(
     expresses — so over its output the shapes are redundant by construction.
     Turtle has no loader at all, and this is what it gets instead.
 
+    ``document_cache_bytes`` bounds what one run keeps in memory while it works:
+    a document is read and parsed once and held for the citations that follow,
+    which is where a large collection's time goes. Lower it on a memory-tight
+    machine; a document larger than the budget is used and simply not retained.
+
     Returns the results. With ``emit_provenance``, returns
     ``(results, prov_graph)``, as ``run_checks`` does.
     """
@@ -91,6 +98,7 @@ def check_graph(
         strict_redirects=strict_redirects,
         strict_repos=strict_repos,
         crawl=crawl,
+        document_cache_bytes=document_cache_bytes,
     )
 
     if not validate_shapes:

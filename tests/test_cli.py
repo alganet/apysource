@@ -9,7 +9,7 @@ import json
 from unittest.mock import patch
 
 import pytest
-from rdflib import URIRef
+from rdflib import Graph, URIRef
 from rdflib.namespace import RDF
 
 from apysource.cli._base import CLIContext
@@ -595,3 +595,54 @@ def test_validate_fails_a_ttl_the_shapes_refuse(tmp_path, capsys):
 
     assert exc.value.code == 1
     assert "SHACL — FAILED" in capsys.readouterr().out
+
+
+class TestWorkersFlag:
+    """`--workers` is validated; a valid value must not then be dropped."""
+
+    def _command(self, tmp_path, fetcher):
+        from apysource.cli._base import CLIContext
+        from apysource.cli.check_sources import CheckSourcesCommand
+        from tests.conftest import EMPTY_REGISTRY
+
+        return CheckSourcesCommand(
+            ctx=CLIContext(project_root=str(tmp_path), rdf_subdir="rdf",
+                           sources_cache_subdir="sources"),
+            registry=EMPTY_REGISTRY, fetcher=fetcher,
+        )
+
+    def test_it_reaches_the_fetcher(self, tmp_path):
+        from apysource.http import CachedFetcher
+
+        fetcher = CachedFetcher(cache_dir=tmp_path, default_delay=0)
+        command = self._command(tmp_path, fetcher)
+
+        with pytest.raises(SystemExit):
+            command.run(graph=Graph(), args=["--workers", "7"])
+
+        assert fetcher.workers == 7
+
+    def test_a_valid_value_with_no_fetcher_is_an_error_not_a_shrug(self, tmp_path):
+        """The one outcome that leaves the user nothing to go on.
+
+        Having rejected `--workers 0` and `--workers abc`, accepting `8` and
+        silently ignoring it means waiting out a serial run believing it is
+        parallel.
+        """
+        command = self._command(tmp_path, fetcher=None)
+
+        with pytest.raises(SystemExit) as exit_info:
+            command.run(graph=Graph(), args=["--workers", "8"])
+
+        assert exit_info.value.code == 1
+
+    @pytest.mark.parametrize("value", ["0", "-3", "abc"])
+    def test_a_value_that_is_not_a_worker_count_is_refused(self, tmp_path, value):
+        from apysource.http import CachedFetcher
+
+        command = self._command(tmp_path, CachedFetcher(cache_dir=tmp_path))
+
+        with pytest.raises(SystemExit) as exit_info:
+            command.run(graph=Graph(), args=["--workers", value])
+
+        assert exit_info.value.code == 1

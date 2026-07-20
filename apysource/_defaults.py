@@ -26,7 +26,7 @@ class Compiled:
 
     def http_client(self):
         if not hasattr(self, '_http_client'):
-            self._http_client = apysource.http.CachedFetcher(cache_dir=self.http_cache_dir(), default_delay=self.default_crawl_delay(), default_timeout=self.default_http_timeout())
+            self._http_client = apysource.http.CachedFetcher(cache_dir=self.http_cache_dir(), default_delay=self.default_crawl_delay(), default_timeout=self.default_http_timeout(), workers=self.default_http_workers(), retries=self.default_http_retries(), backoff_factor=self.default_http_backoff())
         return self._http_client
 
     def repo_archive(self):
@@ -76,7 +76,7 @@ class Compiled:
 
     def check_sources_cmd(self):
         if not hasattr(self, '_check_sources_cmd'):
-            self._check_sources_cmd = apysource.cli.check_sources.CheckSourcesCommand(ctx=self.ctx(), registry=self.registry(), fetcher=self.http_client())
+            self._check_sources_cmd = apysource.cli.check_sources.CheckSourcesCommand(ctx=self.ctx(), registry=self.registry(), fetcher=self.http_client(), document_cache_bytes=self.default_document_cache_bytes())
         return self._check_sources_cmd
 
     def project_root(self):
@@ -96,6 +96,18 @@ class Compiled:
 
     def default_http_timeout(self):
         return 30
+
+    def default_http_workers(self):
+        return 8
+
+    def default_http_retries(self):
+        return 3
+
+    def default_http_backoff(self):
+        return 0.5
+
+    def default_document_cache_bytes(self):
+        return 67108864
 
     def archive_url_pattern(self):
         return 'archive\\.org/details/(.+?)(?:/|$|\\?|#)'

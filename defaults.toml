@@ -18,6 +18,22 @@ http_cache_dir = "data/cache"
 default_crawl_delay = 3.0
 default_http_timeout = 30
 
+# How many documents may be fetched at once. The delay above is enforced *per
+# host*, so raising this parallelises a run across the sites it cites and never
+# within one of them — a sources file naming twenty domains gets twenty times
+# the throughput without asking any single server for more than it was already
+# being asked for. 1 is the old serial behaviour exactly.
+default_http_workers = 8
+
+# Retried only for 429 and 5xx. A 404 is an answer, not a failure.
+default_http_retries = 3
+default_http_backoff = 0.5
+
+# How much document text one run may keep in memory. Citations cluster on
+# documents, so holding them is what turns "parse this page once per citation"
+# into "parse it once".
+default_document_cache_bytes = 67108864
+
 # ── URL patterns and base URLs ────────────────────────────────────────────
 
 archive_url_pattern = "archive\\.org/details/(.+?)(?:/|$|\\?|#)"
@@ -48,6 +64,9 @@ mdn_crawl_delay = 0.5
 cache_dir = "{http_cache_dir}"
 default_delay = "{default_crawl_delay}"
 default_timeout = "{default_http_timeout}"
+workers = "{default_http_workers}"
+retries = "{default_http_retries}"
+backoff_factor = "{default_http_backoff}"
 
 # ── Wired repos ───────────────────────────────────────────────────────────
 
@@ -94,6 +113,7 @@ ctx = "{ctx}"
 ctx = "{ctx}"
 registry = "{registry}"
 fetcher = "{http_client}"
+document_cache_bytes = "{default_document_cache_bytes}"
 
 ["apysource.cli.locate.LocateCommand locate_cmd"]
 http_client = "{http_client}"

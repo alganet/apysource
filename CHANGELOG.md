@@ -12,6 +12,82 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **`check --workers N` fetches several documents at once.** The polite delay is now
+  enforced *per host*, so this parallelises a run across the sites it cites and never
+  within one of them: a sources file naming twenty domains gets twenty times the
+  throughput while no single server is asked for more than it was before. The prefetch
+  is advisory — it returns nothing and only warms caches the serial code already
+  consults — so verification, diagnosis and reporting still happen in fragment order on
+  one thread, and rdflib is never touched from a worker. A run at `--workers 16` and the
+  same run at `--workers 1` produce the same report, and there is a test that compares
+  the whole report rather than its tallies.
+
+  On by default (`default_http_workers = 8`), and safe to be, because only documents
+  that are **not already cached** are handed to a worker. A warm re-check has no network
+  wait to overlap, so it does not start a pool at all and costs exactly what it did
+  before — the worker count only becomes visible on a run that has fetching to do. A
+  cold crawl of 300 documents over a 50ms link goes from 16.8s to 1.9s; a warm re-check
+  of the same file is unchanged either way.
+- **Retries with backoff** for 429 and 5xx (`default_http_retries`,
+  `default_http_backoff`), and `Retry-After` is honoured in both its forms — a count of
+  seconds and an HTTP-date. 404, 403 and 410 are deliberately *not* retried: they are
+  answers, not failures, and retrying one turns a repo's `RepoNotFound` into a slow
+  `RepoNotFound`. An exhausted retry still reports the status the server gave, so a 503
+  that never clears is never mistaken for "there was no server".
+
+  The retrying is apysource's own rather than the HTTP adapter's, because `urllib3`
+  sleeps for its backoff *inside* a single call — which put those requests outside the
+  per-host rate limit entirely. A host answering 503 would have received about four
+  times the volume at a fraction of the intended spacing, at the moment it could least
+  take it. Every attempt now passes through the same limiter as every other request, and
+  the backoff is spent as a hold on that host rather than as a sleep of its own, so the
+  wait is whichever of the two is longer.
+- **`default_document_cache_bytes`** bounds what one run keeps in memory, and is
+  reachable from `check_graph` as `document_cache_bytes` for library callers.
+
+### Changed
+- **A document is fetched, read and parsed once per run, not once per citation.**
+  Verification loaded every fragment twice — once to check the extraction was non-empty,
+  once to look for the snippet — and each load re-read the file, re-detected the format
+  and re-parsed it. A page carrying a hundred citations was two hundred parses of one
+  document. The two phases now share one load through a per-run `DocumentCache`
+  (`default_document_cache_bytes`, 64 MB, LRU), and HTML is parsed once per document
+  rather than once per selector. On a synthetic 5000-fragment run over 50 documents:
+  13.2s to 1.8s, with a byte-identical report.
+- **`--refresh` re-fetches each document once, not once per citation of it.** It deletes
+  the cached body before re-fetching, and it was asked for per fragment — so twenty
+  citations of one page meant twenty deletes and twenty downloads of the same document.
+- **The polite delay is per host, and taken before the request.** Previously one global
+  sleep after every fetch: a run citing two different sites waited three seconds between
+  them for no reason, a run that fetched one page slept three seconds after the last
+  thing it did, and a failed request skipped the delay entirely — so a host answering
+  500s was the one hit hardest.
+- **Connections are reused** (`requests.Session` with a pooled adapter) instead of a new
+  TCP and TLS handshake per fetch. A session comes with a cookie jar, and this one is
+  given a policy that refuses to store into it: connection reuse is what the session is
+  for, and carrying a cookie from one citation to the next could let a site serve the
+  second one something the first never saw. Refused rather than cleared afterwards,
+  because `CookieJar.clear()` rebinds its backing dict without the lock the jar's own
+  readers hold — safe in a serial run, and a way to lose another worker's redirect
+  cookie once there are workers.
+- **The content-extraction check reads the whole document**, where it read the first
+  50 000 characters. Nothing was bought by the cap — it only asks whether the extraction
+  is long enough to be worth matching — and it changed one answer for the worse: a
+  document over 50 000 characters of pure whitespace *passed*, on the strength of the
+  `... [N more chars]` marker that `truncate` appends. Such a document now fails, which
+  is the right answer.
+
+### Fixed
+- **Cache writes no longer share a scratch filename.** The write is tmp-then-rename,
+  which is atomic only if no two writers pick the same tmp; the name was fixed per URL,
+  so two CI jobs pointed at one cache directory could publish a truncated body under a
+  name that says it is complete. The scratch file is now removed on the way out whether
+  the write succeeded or raised, and a run started more than an hour after one was
+  abandoned clears it — a uniquely-named scratch file is never reused or overwritten, so
+  without both a killed run would leak a document's worth of bytes into the cache
+  directory every time.
+
 ## [0.6.0] - 2026-07-20
 
 ### Added

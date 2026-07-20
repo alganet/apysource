@@ -344,6 +344,29 @@ Fetched pages are cached on disk and reused indefinitely (no time-based expiry).
 
 Pass `--strict-redirects` to `check` to fail, rather than warn, when a source URL has moved. Note that a page cached before apysource recorded redirect destinations reports its destination as *unknown*, not as clean — `--refresh` resolves that.
 
+### Crawling a large collection
+
+`check --workers N` fetches several documents at once, and defaults to 8. The
+polite delay is enforced **per host**, so this parallelises a run *across* the
+sites it cites and never *within* one of them — a sources file naming twenty
+domains gets twenty times the throughput, while no single server is asked for
+more than it was before. A file citing one host is paced exactly as it was,
+whatever `N` says.
+
+It changes speed and nothing else. Fetching happens up front and returns nothing;
+every check, diagnosis and line of the report is still produced serially, in
+fragment order. `--workers 16` and `--workers 1` yield the same report.
+
+Only documents that are not already cached are fetched concurrently, so a warm
+re-check — the commonest thing this tool does — has nothing to overlap, starts no
+workers, and costs what it always did. Set `--workers 1` if you want to be sure
+of that; there is otherwise little reason to.
+
+Documents are read and parsed once per run rather than once per citation, so a
+page carrying a hundred citations costs one fetch and one parse. Set
+`default_document_cache_bytes` in your config to bound what that holds (64 MB by
+default); a document larger than the budget is used and not retained.
+
 ## Advanced Features
 
 For RDF support, Python API, custom source repositories and more, 

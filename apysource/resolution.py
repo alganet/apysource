@@ -17,13 +17,21 @@ are checking against.
 
 from __future__ import annotations
 
+import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import cast
+from typing import Iterable, cast
 
 from rdflib import Graph, URIRef
 from rdflib.namespace import DCTERMS, RDF, RDFS
 
-from apysource.formats import detect_format, extract_content, truncate
+from apysource.documents import DocumentCache, document_key
+from apysource.formats import (
+    DEFAULT_FORMATS,
+    detect_format,
+    extract_content,
+    truncate,
+)
 from apysource.http import CachedFetcher, document_url, url_anchor
 from apysource.namespaces import OA, SCHEMA, SV
 from apysource.repos import RepoRegistry
@@ -31,6 +39,8 @@ from apysource.repos._base import BaseRepo
 from apysource.repos.errors import RepoNotFound, RepoUnavailable
 from apysource.sections import SectionNotFound, selector_for_anchor
 from apysource.results import FetcherResult, RepoResult, ResolveResult, TextOutcome
+
+logger = logging.getLogger(__name__)
 
 
 # ── OA graph traversal helpers ──────────────────────────────────────────
@@ -229,7 +239,8 @@ def resolve_direct(g: Graph, entity_uri: URIRef, registry: RepoRegistry,
     return ResolveResult(status="no_module", label=label, url=url)
 
 
-def _apply_targeting(result: ResolveResult, text: str) -> tuple[str, str | None]:
+def _apply_targeting(result: ResolveResult, text: str,
+                     formats: list | None = None) -> tuple[str, str | None]:
     """The format and locator to extract with, once the document is in hand.
 
     An explicit ``section:``/``selector:`` always wins — the author said it
@@ -241,14 +252,16 @@ def _apply_targeting(result: ResolveResult, text: str) -> tuple[str, str | None]
     if locator or not result.anchor:
         return format_name, locator
 
-    inferred = selector_for_anchor(text, result.anchor, detect_format(text))
+    fmts = formats if formats is not None else DEFAULT_FORMATS
+    inferred = selector_for_anchor(text, result.anchor, detect_format(text, fmts))
     if inferred is None:
         return format_name, locator
     return "section", inferred
 
 
 def _load_repo_text(result: RepoResult, max_chars: int | None, *,
-                    force: bool, crawl: bool) -> TextOutcome:
+                    force: bool, crawl: bool,
+                    cache: DocumentCache | None = None) -> TextOutcome:
     """Read a repo-backed document, crawling it first if it is not here yet.
 
     Every path returns. The generic fetcher is deliberately unreachable from
@@ -314,19 +327,127 @@ def _load_repo_text(result: RepoResult, max_chars: int | None, *,
     # URL verified green, because the repo returned the whole page and the
     # snippet was found somewhere in it. The identical fragment on a fetched URL
     # failed, correctly. Which answer you got depended on who served the file.
-    format_name, locator = _apply_targeting(result, text)
+    formats = cache.formats if cache is not None else DEFAULT_FORMATS
+    format_name, locator = _apply_targeting(result, text, formats)
     if locator:
         try:
-            text = extract_content(text, locator,
-                                   format_name=format_name, strict=True)
+            text = extract_content(text, locator, format_name=format_name,
+                                   formats=formats, strict=True)
         except SectionNotFound as e:
             return TextOutcome("", "no_section", e.message)
 
     return TextOutcome(truncate(text, max_chars))
 
 
+def _needs_fetching(result: ResolveResult, force: bool) -> bool:
+    """Would getting this document actually require the network?
+
+    ``force`` means every document is being re-fetched, so the answer is yes
+    whatever is on disk.
+
+    A source that cannot answer — a stub fetcher in a test, a repo written
+    before this contract — is assumed to need fetching. That is the safe way
+    round: the cost of being wrong is a warm-up that was not needed, and the
+    cost of the other answer is a serial crawl that thought it was parallel.
+    """
+    if force:
+        return True
+
+    if isinstance(result, FetcherResult) and result.fetcher is not None:
+        cached = getattr(result.fetcher, "is_cached", None)
+        return not cached(result.url) if callable(cached) else True
+
+    if isinstance(result, RepoResult) and result.repo is not None:
+        if not result.key:
+            return False
+        try:
+            return not result.repo.is_cached(result.key)
+        except Exception:  # noqa: BLE001 - a repo that cannot say gets warmed
+            return True
+
+    return False
+
+
+def prefetch(results: Iterable[ResolveResult], *, cache: DocumentCache,
+             workers: int = 1, force: bool = False, crawl: bool = True) -> None:
+    """Warm the caches for a run's documents, several at a time.
+
+    **This is advisory, and that is the whole design.** It returns nothing, and
+    the only trace it leaves is in two caches that already existed and were
+    already memoized: the fetcher's directory on disk, and ``BaseRepo._crawls``,
+    which replays a crawl's outcome — including its failures — rather than
+    repeating it. Skip this function entirely, or lose every worker to an
+    exception, and the serial code that follows is unchanged and self-sufficient.
+    It simply runs slower.
+
+    That is what makes the report's ordering **provable** rather than merely
+    tested. Nothing here appends to a result list, and nothing here decides a
+    verdict; the checks that follow still walk ``fragments`` in the order they
+    were given, on this thread. ``workers=1`` is not a special case handled
+    somewhere — it is literally the behaviour this whole function is optional to.
+
+    rdflib is never touched from a worker, and cannot be: resolution finished
+    before this was called, and a ``ResolveResult`` holds plain strings. The
+    store's documented lack of thread safety is therefore not in play.
+    """
+    if workers <= 1:
+        return
+
+    #: One task per *document*, not per fragment. Fifty citations of one page
+    #: are one download, which is the same rule `document_url` already applies.
+    #:
+    #: And only documents that are not already here. This exists to overlap
+    #: *network* waits; a document on disk has none to overlap, and warming it
+    #: from a worker is pure cost — it reads and decodes the whole corpus up
+    #: front, where the serial path would have read each one just before using
+    #: it. Measured at about 7% on a fully warm run over a thousand documents,
+    #: plus the memory to hold them all at once. A re-check of an unchanged
+    #: sources file is the commonest thing this tool does, and it should not pay
+    #: for a concurrency it cannot use.
+    tasks: dict[str, ResolveResult] = {}
+    for result in results:
+        if result.status != "resolved":
+            continue
+        key = document_key(result)
+        if key is not None and key not in tasks and _needs_fetching(result, force):
+            tasks[key] = result
+
+    # One document is not worth a thread pool; nor is none.
+    if len(tasks) < 2:
+        return
+
+    def warm(key: str, result: ResolveResult) -> None:
+        # Claimed here so the serial pass does not refresh the same document a
+        # second time — and so `--refresh` is one request per document rather
+        # than one per citation of it.
+        forced = force and cache.claim_force(key)
+        if isinstance(result, FetcherResult) and result.fetcher is not None:
+            fetcher, url = result.fetcher, result.url
+            # Stored, not merely fetched. Handing the body to the memo is what
+            # makes this one read of the document rather than two — the serial
+            # pass would otherwise ask the fetcher again and get the same bytes
+            # back off disk.
+            cache.body(key, lambda: fetcher.get(url, force=forced))
+        elif isinstance(result, RepoResult) and result.repo is not None:
+            if crawl and result.key:
+                result.repo.ensure(result.key, force=forced)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(warm, key, result)
+                   for key, result in tasks.items()]
+        for future in futures:
+            try:
+                future.result()
+            except BaseException as e:  # noqa: BLE001
+                # A warm-up can never be *necessary*, so it must never be able
+                # to fail the run. Whatever went wrong here will happen again on
+                # the serial path, where there is a report to say it in.
+                logger.debug("prefetch: %s", e)
+
+
 def load_text(result: ResolveResult, max_chars: int | None = 5000, *,
-              force: bool = False, crawl: bool = True) -> TextOutcome:
+              force: bool = False, crawl: bool = True,
+              cache: DocumentCache | None = None) -> TextOutcome:
     """Extract source text, and say why there is none when there is none.
 
     ``max_chars=None`` returns the whole document. Verification asks for that:
@@ -337,16 +458,69 @@ def load_text(result: ResolveResult, max_chars: int | None = 5000, *,
     one. ``crawl=False`` refuses to fetch a repo document that is not cached,
     reporting it instead — an honest miss rather than a quiet fetch of some
     other document.
+
+    ``cache`` memoizes both the document and the text a given targetting pulls
+    out of it, for the length of one run. ``None`` — the default, and what every
+    caller outside ``run_checks`` passes — does none of that and behaves exactly
+    as this function always has.
     """
+    if cache is not None:
+        key = document_key(result)
+        if key is not None:
+            return _cached_load(result, max_chars, force=force, crawl=crawl,
+                                cache=cache, key=key)
+
+    return _load_text(result, max_chars, force=force, crawl=crawl)
+
+
+def _cached_load(result: ResolveResult, max_chars: int | None, *,
+                 force: bool, crawl: bool, cache: DocumentCache,
+                 key: str) -> TextOutcome:
+    """``load_text`` with the per-run memos in front of it.
+
+    The extraction key carries everything that can change the answer for a given
+    document: which format was named, what was targeted, the anchor the URL
+    already carried, and how much was asked for. ``force`` is not part of it —
+    it decides whether the document is fetched afresh, not what the extraction
+    makes of it — and it is claimed once per document so a hundred fragments
+    citing one page produce one refresh rather than a hundred.
+    """
+    if force and not cache.claim_force(key):
+        force = False
+
+    extract_key = (key, getattr(result, "format_name", ""),
+                   getattr(result, "locator", None), result.anchor,
+                   max_chars, crawl, force)
+
+    return cache.extraction(
+        extract_key,
+        lambda: _load_text(result, max_chars, force=force, crawl=crawl,
+                           cache=cache, key=key),
+    )
+
+
+def _load_text(result: ResolveResult, max_chars: int | None = 5000, *,
+               force: bool = False, crawl: bool = True,
+               cache: DocumentCache | None = None,
+               key: str = "") -> TextOutcome:
+    """The actual work, with no memoization of its own."""
     if isinstance(result, FetcherResult) and result.fetcher is not None:
-        body = result.fetcher.get(result.url, force=force)
+        fetcher = result.fetcher
+        url = result.url
+        if cache is not None and not force:
+            # Only a non-forced read may be answered from the body memo; a
+            # forced one is the request that refills it.
+            body = cache.body(key, lambda: fetcher.get(url, force=False))
+        else:
+            body = fetcher.get(url, force=force)
         if not body:
             return TextOutcome("", "unavailable", f"could not fetch {result.url}")
 
-        format_name, locator = _apply_targeting(result, body)
+        formats = cache.formats if cache is not None else DEFAULT_FORMATS
+        format_name, locator = _apply_targeting(result, body, formats)
         try:
             text = extract_content(
-                body, locator, format_name=format_name,
+                body, locator, format_name=format_name, formats=formats,
                 strict=True,
             )
         except SectionNotFound as e:
@@ -358,7 +532,8 @@ def load_text(result: ResolveResult, max_chars: int | None = 5000, *,
         return TextOutcome(truncate(text, max_chars))
 
     if isinstance(result, RepoResult):
-        return _load_repo_text(result, max_chars, force=force, crawl=crawl)
+        return _load_repo_text(result, max_chars, force=force, crawl=crawl,
+                               cache=cache)
 
     return TextOutcome("", "no_file", "")
 

@@ -950,3 +950,216 @@ def test_a_run_that_verified_nothing_is_not_a_pass():
     real = [CheckResult("Fragments", 1, 1, [])]
     assert not nothing_verified(real)
     assert not failed(real)
+
+
+# ── Concurrency: what must not change when workers are added ────────────
+
+class TestWorkersChangeNothingButSpeed:
+    """The prefetch is advisory. These say what that has to mean."""
+
+    def _graph_and_fetcher(self, count, workers):
+        """`count` fragments over `count` sources, all fetchable."""
+        from tests.conftest import MockFetcher
+        from rdflib import BNode, Graph, Literal
+        from rdflib.namespace import RDF, RDFS
+        from apysource.namespaces import OA, SCHEMA, SV
+
+        body = "Hello world. " + ("the quick brown fox jumps over it. " * 40)
+        g = Graph()
+        for i in range(count):
+            frag = URIRef(f"urn:apysource:fragment_{i:03d}")
+            src = URIRef(f"urn:apysource:source_{i:03d}")
+            g.add((frag, RDF.type, SV.Fragment))
+            g.add((frag, RDFS.label, Literal(f"fragment {i:03d}")))
+            target = BNode()
+            g.add((frag, OA.hasTarget, target))
+            g.add((target, OA.hasSource, src))
+            sel = BNode()
+            g.add((target, OA.hasSelector, sel))
+            g.add((sel, RDF.type, OA.TextQuoteSelector))
+            g.add((sel, OA.exact, Literal("the quick brown fox jumps over it.")))
+            g.add((src, RDF.type, SV.Source))
+            g.add((src, RDFS.label, Literal(f"source {i:03d}")))
+            g.add((src, SCHEMA.url, Literal(f"https://example.com/doc{i:03d}")))
+
+        fetcher = MockFetcher(content=body)
+        fetcher.workers = workers
+        return g, fetcher
+
+    def test_one_worker_and_eight_report_exactly_the_same_thing(self):
+        """Not "the same counts" — the same report.
+
+        Ordering is the thing at risk when work is spread across threads, and a
+        pass/fail tally would hide a reordering completely. `json_report`
+        carries the failures in the order the checks built them, so comparing it
+        whole is what actually pins the promise.
+        """
+        from apysource.api import check_graph
+        from apysource.verification import json_report
+
+        g1, f1 = self._graph_and_fetcher(24, workers=1)
+        g8, f8 = self._graph_and_fetcher(24, workers=8)
+
+        serial = json_report(check_graph(g1, registry=EMPTY_REGISTRY, fetcher=f1))
+        parallel = json_report(check_graph(g8, registry=EMPTY_REGISTRY, fetcher=f8))
+
+        assert serial == parallel
+
+    def test_a_document_is_still_fetched_once_per_url(self):
+        """The prefetch must dedupe by document, not fan out per fragment."""
+        from apysource.api import check_graph
+
+        g, fetcher = self._graph_and_fetcher(12, workers=4)
+        check_graph(g, registry=EMPTY_REGISTRY, fetcher=fetcher)
+
+        assert len(fetcher.calls) == len(set(fetcher.calls)), (
+            f"a URL was fetched more than once: {fetcher.calls}"
+        )
+
+    def test_a_prefetch_that_explodes_does_not_fail_the_run(self):
+        """A warm-up can never be necessary, so it must never be fatal.
+
+        Whatever it hit will be hit again on the serial path, where there is a
+        report to say it in — so the run must come out the same as if the
+        prefetch had never been asked for.
+        """
+        from apysource.api import check_graph
+        from apysource.verification import json_report
+
+        g_ok, f_ok = self._graph_and_fetcher(8, workers=1)
+        expected = json_report(check_graph(g_ok, registry=EMPTY_REGISTRY, fetcher=f_ok))
+
+        g, fetcher = self._graph_and_fetcher(8, workers=4)
+        real_get = fetcher.get
+        calls = {"n": 0}
+
+        def explode_during_prefetch(url, **kwargs):
+            # Blow up only while several threads are running; the serial pass
+            # that follows gets the real thing.
+            calls["n"] += 1
+            if calls["n"] <= 8:
+                raise RuntimeError("prefetch went wrong")
+            return real_get(url, **kwargs)
+
+        fetcher.get = explode_during_prefetch
+        got = json_report(check_graph(g, registry=EMPTY_REGISTRY, fetcher=fetcher))
+
+        assert got == expected
+
+
+class TestOneDocumentIsReadOnce:
+    def test_many_fragments_on_one_url_fetch_it_once(self):
+        """The shape a large sources file actually has.
+
+        Fifty citations of one specification are one document. This was two
+        loads per fragment — a hundred reads, and for HTML a hundred parses —
+        of bytes that had not changed between the first and the last.
+        """
+        from rdflib import BNode, Graph, Literal
+        from rdflib.namespace import RDF, RDFS
+        from apysource.api import check_graph
+        from apysource.namespaces import OA, SCHEMA, SV
+        from tests.conftest import MockFetcher
+
+        url = "https://example.com/one-big-page"
+        body = "Hello world. " + ("the quick brown fox jumps over it. " * 40)
+
+        g = Graph()
+        src = URIRef("urn:apysource:source_one")
+        g.add((src, RDF.type, SV.Source))
+        g.add((src, RDFS.label, Literal("one source")))
+        g.add((src, SCHEMA.url, Literal(url)))
+        for i in range(50):
+            frag = URIRef(f"urn:apysource:fragment_{i:03d}")
+            g.add((frag, RDF.type, SV.Fragment))
+            g.add((frag, RDFS.label, Literal(f"fragment {i:03d}")))
+            target = BNode()
+            g.add((frag, OA.hasTarget, target))
+            g.add((target, OA.hasSource, src))
+            sel = BNode()
+            g.add((target, OA.hasSelector, sel))
+            g.add((sel, RDF.type, OA.TextQuoteSelector))
+            g.add((sel, OA.exact, Literal("the quick brown fox jumps over it.")))
+
+        fetcher = MockFetcher(content=body)
+        check_graph(g, registry=EMPTY_REGISTRY, fetcher=fetcher)
+
+        assert fetcher.calls.count(url) == 1, (
+            f"one document, 50 citations, {fetcher.calls.count(url)} fetches"
+        )
+
+
+class TestPrefetchOnlyWarmsWhatIsNotHere:
+    """Concurrency that cannot be used should not be paid for.
+
+    Warming a document that is already on disk overlaps nothing — there is no
+    network wait — and costs a thread pool plus reading and decoding the whole
+    corpus up front, where the serial path reads each one just before using it.
+    Measured at about 7% and tens of megabytes on a warm run over a thousand
+    documents. Re-checking an unchanged sources file is the commonest thing this
+    tool does, and it is exactly the case with nothing to gain.
+    """
+
+    def test_a_cached_document_is_not_warmed(self):
+        from apysource.resolution import _needs_fetching
+        from apysource.results import FetcherResult
+        from tests.conftest import MockFetcher
+
+        result = FetcherResult(status="resolved", url="https://example.com/a",
+                               fetcher=MockFetcher(cached=True))
+
+        assert _needs_fetching(result, force=False) is False
+
+    def test_an_uncached_document_is_warmed(self):
+        from apysource.resolution import _needs_fetching
+        from apysource.results import FetcherResult
+        from tests.conftest import MockFetcher
+
+        result = FetcherResult(status="resolved", url="https://example.com/a",
+                               fetcher=MockFetcher(cached=False))
+
+        assert _needs_fetching(result, force=True) is True
+        assert _needs_fetching(result, force=False) is True
+
+    def test_refresh_warms_everything_however_warm_the_cache_is(self):
+        """`--refresh` is the one case where a cached document still needs the
+        network, so the skip must not apply to it."""
+        from apysource.resolution import _needs_fetching
+        from apysource.results import FetcherResult
+        from tests.conftest import MockFetcher
+
+        result = FetcherResult(status="resolved", url="https://example.com/a",
+                               fetcher=MockFetcher(cached=True))
+
+        assert _needs_fetching(result, force=True) is True
+
+    def test_a_fetcher_that_cannot_answer_is_warmed_anyway(self):
+        """The safe way round: a needless warm-up costs a little, and a serial
+        crawl that believed it was parallel costs the whole run."""
+        from apysource.resolution import _needs_fetching
+        from apysource.results import FetcherResult
+
+        class _Old:
+            def get(self, url, **kwargs):
+                return "body"
+
+        result = FetcherResult(status="resolved", url="https://example.com/a",
+                               fetcher=_Old())
+
+        assert _needs_fetching(result, force=False) is True
+
+    def test_a_warm_run_reads_each_document_once_whatever_the_worker_count(self):
+        """The end of it: warm, the worker count changes nothing at all."""
+        from apysource.api import check_graph
+
+        counts = {}
+        for workers in (1, 8):
+            g, fetcher = TestWorkersChangeNothingButSpeed()._graph_and_fetcher(
+                12, workers=workers)
+            fetcher.cached = True
+            check_graph(g, registry=EMPTY_REGISTRY, fetcher=fetcher)
+            counts[workers] = len(fetcher.calls)
+
+        assert counts[1] == counts[8], (
+            f"warm run did {counts[8]} reads with workers, {counts[1]} without"
+        )

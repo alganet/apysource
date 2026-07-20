@@ -26,8 +26,15 @@ class MockFetcher:
     """
 
     def __init__(self, content=DEFAULT_HTML, *, routes=None, redirects=None,
-                 statuses=None):
+                 statuses=None, cached=False):
         self.content = content
+        #: Whether these documents are to be treated as already on disk.
+        #:
+        #: The real fetcher answers this from a stat, and a run uses it to skip
+        #: warming documents it can already read — there is no network wait to
+        #: overlap. Defaults to False, so a double behaves like a cold cache and
+        #: the concurrent path stays exercised.
+        self.cached = cached
         self.routes = routes or {}
         self.redirects = redirects or {}
         self.statuses = statuses or {}
@@ -53,6 +60,15 @@ class MockFetcher:
         if isinstance(response, str):
             return response.encode("utf-8")
         return response
+
+    def is_cached(self, url):
+        """As the real fetcher answers it: a stat, and never a fetch.
+
+        Asking must not count as fetching, for the same reason `status_for`
+        does not — a test proving a URL was never fetched would otherwise
+        prove it by accident.
+        """
+        return self.cached
 
     def status_for(self, url):
         """The status a fetch got, as the real fetcher reports it.
