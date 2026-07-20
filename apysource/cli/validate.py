@@ -10,6 +10,7 @@ from rdflib import Graph
 
 from apysource.cli._base import CLIContext
 from apysource.graph import load_triples_split
+from apysource.shapes import conforms, shipped_shapes
 
 
 class ValidateCommand:
@@ -34,17 +35,20 @@ class ValidateCommand:
         self.ctx = ctx
 
     def run(self, graph: Graph | None = None,
-            args: list[str] | None = None) -> None:
+            args: list[str] | None = None, vetted: bool = False) -> None:
         """Validate the given citations file, or every Turtle file; exit 1 on failure."""
         print("=" * 60)
         print("  apysource Validation")
         print("=" * 60)
 
         if graph is not None:
-            # Reaching here at all means the file loaded, and loading is what
-            # enforces identity, known keys and scalar values. `__main__` turns
-            # a refusal into one clear line and exits 1 before we are called.
-            print(f"\n  Citations file — OK ({len(graph)} triples)")
+            # Reaching here at all means the file parsed. For a `.yaml` that also
+            # means it *loaded* — identity, known keys, scalar values, a quote to
+            # verify — and `__main__` turned any refusal into one clear line and
+            # exited before we were called. For a `.ttl` it means only that the
+            # syntax was Turtle; the shapes below are what reads it.
+            kind = "Citations file" if vetted else "Turtle file"
+            print(f"\n  {kind} — parsed OK ({len(graph)} triples)")
             shapes = Graph()
             g = graph
         else:
@@ -69,23 +73,26 @@ class ValidateCommand:
 
         print("\n[2/2] SHACL validation...")
         skipped = False
-        if not len(shapes):
-            print("  SHACL — SKIPPED (no shapes found)")
+
+        # The shipped shapes always apply; a project's own are *added* to them,
+        # never a replacement. Before, shapes were looked for only under the
+        # project's RDF root — where apysource's own could never be — so this
+        # step reported "SKIPPED (no shapes found)" on every run there has ever
+        # been, and the constraints rotted unobserved for want of anything
+        # checking them.
+        shapes += shipped_shapes()
+
+        ok, report = conforms(g, shapes)
+        if ok is None:
+            print(f"  SHACL — SKIPPED ({report})")
             skipped = True
+        elif ok:
+            print("  SHACL — PASSED")
         else:
-            try:
-                from pyshacl import validate
-                conforms, _, results_text = validate(g, shacl_graph=shapes)
-                if conforms:
-                    print("  SHACL — PASSED")
-                else:
-                    print("  SHACL — FAILED")
-                    for line in results_text.split("\n")[:20]:
-                        print(f"    {line}")
-                    sys.exit(1)
-            except ImportError:
-                print("  SHACL — SKIPPED (pyshacl not installed)")
-                skipped = True
+            print("  SHACL — FAILED")
+            for line in report.split("\n")[:20]:
+                print(f"    {line}")
+            sys.exit(1)
 
         print(f"\n{'=' * 60}")
         if skipped:

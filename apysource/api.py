@@ -20,7 +20,7 @@ from typing import Any
 from rdflib import Graph
 
 from apysource.namespaces import SV
-from apysource.results import CheckResult
+from apysource.results import CheckResult, Failure
 from apysource.verification import run_checks
 
 #: What apysource checks, and it is checked the same way whoever asks.
@@ -63,6 +63,7 @@ def check_graph(
     strict_repos: bool = False,
     crawl: bool = True,
     emit_provenance: bool = False,
+    validate_shapes: bool = False,
 ) -> list[CheckResult] | tuple[list[CheckResult], Graph]:
     """Run the standard checks against a sources graph.
 
@@ -70,10 +71,17 @@ def check_graph(
     common case is one argument. Pass them to check against something else — a
     stub in a test, a registry with a repo of your own.
 
+    ``validate_shapes`` adds a SHACL check of the graph itself. Pass it for a
+    graph that arrived as Turtle, and not for one the YAML loader built: the
+    loader is the stricter gate of the two — it refuses unknown keys, non-scalar
+    values, colliding identities and untargeted fragments, none of which SHACL
+    expresses — so over its output the shapes are redundant by construction.
+    Turtle has no loader at all, and this is what it gets instead.
+
     Returns the results. With ``emit_provenance``, returns
     ``(results, prov_graph)``, as ``run_checks`` does.
     """
-    return run_checks(
+    outcome = run_checks(
         g,
         STANDARD_CHECKS,
         default_registry() if registry is _UNSET else registry,
@@ -83,4 +91,40 @@ def check_graph(
         strict_redirects=strict_redirects,
         strict_repos=strict_repos,
         crawl=crawl,
+    )
+
+    if not validate_shapes:
+        return outcome
+
+    results, prov = outcome if isinstance(outcome, tuple) else (outcome, None)
+    results = [*results, _shape_check(g)]
+    return (results, prov) if prov is not None else results
+
+
+def _shape_check(g: Graph) -> CheckResult:
+    """Does this graph say what a citations graph must say?
+
+    Three outcomes, and the third is the one worth spelling out. pyshacl is an
+    optional dependency, and a check that could not run must say so rather than
+    vanish from the report — an absent check reads as a passed one, which is the
+    same lie ``nothing_verified`` was written about. It reports WARN: a missing
+    optional dependency is not a broken citation, but it is not nothing either.
+    """
+    from apysource.shapes import conforms
+
+    ok, report = conforms(g)
+
+    if ok is None:
+        return CheckResult(
+            "Citations shape", 0, 1, structural=True,
+            warnings=[Failure("shapes", "SHACL", f"did not run: {report}")],
+        )
+    if ok:
+        return CheckResult("Citations shape", 1, 1, structural=True)
+
+    # One finding per violation would be nicer; the report is prose, and
+    # inventing structure by parsing it back apart is how the two drift.
+    return CheckResult(
+        "Citations shape", 0, 1, structural=True,
+        failures=[Failure("shapes", "SHACL", report.strip())],
     )

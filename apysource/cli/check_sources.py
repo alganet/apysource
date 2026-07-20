@@ -35,13 +35,20 @@ class CheckSourcesCommand:
     #: first positional argument (see ``cli.__main__``).
     accepts_graph = True
 
+    #: Flags whose next argument is a value (see ``cli.__main__``). Both of these
+    #: take a `.ttl`, so without this `check --provenance run.ttl sources.yaml`
+    #: loaded `run.ttl` as the graph to check and wrote provenance over
+    #: `sources.yaml`.
+    value_flags = ("--format", "--provenance")
+
     def __init__(self, ctx: CLIContext, registry: RepoRegistry,
                  fetcher: CachedFetcher | None = None) -> None:
         self.ctx = ctx
         self.registry = registry
         self.fetcher = fetcher
 
-    def run(self, graph: Graph | None = None, args: list[str] | None = None) -> None:
+    def run(self, graph: Graph | None = None, args: list[str] | None = None,
+            vetted: bool = False) -> None:
         """Run the configured checks and exit 1 if any fragment fails."""
         if args is None:
             args = []
@@ -77,16 +84,31 @@ class CheckSourcesCommand:
 
         if graph is not None:
             g = graph
+            # `vetted` means it came through `graph_from_data`, the stricter gate
+            # of the two: it has already refused everything SHACL would catch
+            # here, and more besides. Running the shapes over it again buys
+            # nothing and costs a pyshacl import on the path everybody runs.
+            #
+            # A `.ttl` argument also arrives as a graph, and that one is *not*
+            # vetted — nothing has looked at it — so it is checked like any other
+            # Turtle. Reading this off `graph is not None` would have skipped
+            # precisely the input that needs it most.
+            check_shapes = not vetted
         else:
             # stderr, so that --format json leaves stdout carrying only JSON.
             print("\n  Loading RDF...", file=sys.stderr)
             g = load_triples(self.ctx.rdf_root)
+            # Turtle has no loader. `load_triples` parses and hands back whatever
+            # it read, so the shapes are the only thing standing between a
+            # malformed citations graph and a report about it.
+            check_shapes = True
 
         emit_prov = prov_path is not None
         results = check_graph(g, registry=self.registry, fetcher=self.fetcher,
                               emit_provenance=emit_prov, force=force,
                               strict_redirects=strict_redirects,
-                              strict_repos=strict_repos, crawl=not no_crawl)
+                              strict_repos=strict_repos, crawl=not no_crawl,
+                              validate_shapes=check_shapes)
 
         prov_graph = None
         if isinstance(results, tuple):

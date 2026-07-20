@@ -133,6 +133,13 @@ def _targeting(g: Graph, frag_uri: URIRef,
     if section:
         return "section", section
 
+    # Deliberately *not* normalized here, though it looks like it should be.
+    # `_find_format` already matches an internal name ("html", "rfc") before it
+    # tries MIME, so a Turtle author writing `dcterms:format "html"` was always
+    # understood. Normalizing first would make things worse, not better: "rfc"
+    # and "plain-text" both canonicalize to "text/plain", which two formats
+    # claim, and an ambiguous MIME resolves to nothing — so a source that says
+    # exactly what it is would fall through to auto-detection instead.
     format_name = str(g.value(format_holder, DCTERMS.format) or "")
     css = _get_selector_value(g, frag_uri, OA.CssSelector)
     lines = str(g.value(frag_uri, SV.sourceLines) or "")

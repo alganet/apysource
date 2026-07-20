@@ -13,6 +13,7 @@ from rdflib import URIRef
 from rdflib.namespace import RDF
 
 from apysource.cli._base import CLIContext
+from apysource.graph import load_turtle
 from apysource.namespaces import SV
 
 from tests.conftest import EMPTY_REGISTRY, MockFetcher, build_chain_graph
@@ -281,10 +282,12 @@ def test_validate_parses_ttl(tmp_path, capsys):
     # It printed the number of files it *found* (rglob), not the number it
     # parsed — the two differ exactly when a file is being silently dropped.
     assert "triples — OK" in out
-    # No shapes in this directory, so SHACL cannot have run, and the command
-    # must not claim otherwise.
-    assert "SHACL — SKIPPED" in out
-    assert "All checks passed" not in out
+    # The project supplies no shapes of its own, and it does not need to: the
+    # shipped ones always apply. This used to report SKIPPED — on every run
+    # anyone has ever made, since apysource's own shapes could never be found
+    # under a *project's* RDF root.
+    assert "SHACL — PASSED" in out
+    assert "All checks passed" in out
 
 
 def test_validate_refuses_to_pass_when_it_validated_nothing(tmp_path, capsys):
@@ -478,3 +481,117 @@ def test_check_rejects_an_unknown_format(capsys):
     code, _out, err = _run_check(["--format", "xml"], capsys)
     assert code == 1
     assert "unknown --format" in err
+
+
+# ── The shape check, and who gets it ────────────────────────────────────
+
+def _shape_checks(report):
+    return [c for c in report["checks"] if c["name"] == "Citations shape"]
+
+
+def test_a_yaml_loaded_graph_gets_no_shape_check(capsys):
+    """The loader is the stricter gate; running the shapes after it buys nothing.
+
+    This is also the regression test for downstream YAML users: `check` must not
+    grow a new check, a new failure mode, or a pyshacl dependency on the path
+    everybody already runs.
+    """
+    from apysource.cli.check_sources import CheckSourcesCommand
+
+    ctx = CLIContext(project_root=".", rdf_subdir="rdf",
+                     sources_cache_subdir="data/sources")
+    cmd = CheckSourcesCommand(ctx=ctx, registry=EMPTY_REGISTRY)
+    with pytest.raises(SystemExit):
+        cmd.run(graph=_make_check_graph(), args=["--format", "json"], vetted=True)
+
+    assert _shape_checks(json.loads(capsys.readouterr().out)) == []
+
+
+def test_a_turtle_graph_gets_a_shape_check(capsys):
+    """Turtle has no loader. The shapes are the only thing that looks at it."""
+    from apysource.cli.check_sources import CheckSourcesCommand
+
+    ctx = CLIContext(project_root=".", rdf_subdir="rdf",
+                     sources_cache_subdir="data/sources")
+    cmd = CheckSourcesCommand(ctx=ctx, registry=EMPTY_REGISTRY)
+    with pytest.raises(SystemExit):
+        cmd.run(graph=_make_check_graph(), args=["--format", "json"], vetted=False)
+
+    checks = _shape_checks(json.loads(capsys.readouterr().out))
+    assert len(checks) == 1
+
+
+def test_the_shape_check_does_not_make_an_empty_run_pass(capsys):
+    """A structural check is not work.
+
+    The shape check has to carry a total — one with none renders `----` and can
+    never fail — but counting it as work would let an empty Turtle project
+    conform vacuously, report 1/1, and go out green. That is the silent pass
+    this tool exists to abolish, delivered by the machinery meant to strengthen
+    it.
+    """
+    from apysource.cli.check_sources import CheckSourcesCommand
+    from rdflib import Graph as _Graph
+
+    ctx = CLIContext(project_root=".", rdf_subdir="rdf",
+                     sources_cache_subdir="data/sources")
+    cmd = CheckSourcesCommand(ctx=ctx, registry=EMPTY_REGISTRY)
+    with pytest.raises(SystemExit) as exc:
+        cmd.run(graph=_Graph(), args=["--format", "json"], vetted=False)
+
+    report = json.loads(capsys.readouterr().out)
+    assert exc.value.code == 1
+    assert report["summary"]["nothing_verified"] is True
+
+
+# ── A .ttl argument is read ─────────────────────────────────────────────
+
+def test_validate_reads_a_ttl_argument(tmp_path, capsys):
+    """It used to match no suffix, so the file named on the command line was
+    never opened: `validate` scanned the configured RDF root instead and passed
+    the filename on as an unrecognised positional."""
+    from apysource.cli.validate import ValidateCommand
+
+    ttl = tmp_path / "citations.ttl"
+    ttl.write_text(
+        '@prefix sv: <https://alganet.github.io/apysource/vocab.ttl#> .\n'
+        '@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n'
+        '@prefix schema: <https://schema.org/> .\n'
+        '<http://example.org/s> a sv:Source ; rdfs:label "S" ;\n'
+        '  schema:url "https://example.org/" .\n',
+        encoding="utf-8",
+    )
+    ctx = CLIContext(project_root=str(tmp_path), rdf_subdir="rdf",
+                     sources_cache_subdir="data/sources")
+    ValidateCommand(ctx=ctx).run(graph=load_turtle(ttl), args=[], vetted=False)
+
+    out = capsys.readouterr().out
+    assert "Turtle file — parsed OK" in out
+    assert "SHACL — PASSED" in out
+
+
+def test_validate_fails_a_ttl_the_shapes_refuse(tmp_path, capsys):
+    from apysource.cli.validate import ValidateCommand
+
+    ttl = tmp_path / "bad.ttl"
+    ttl.write_text(
+        '@prefix sv: <https://alganet.github.io/apysource/vocab.ttl#> .\n'
+        '@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n'
+        '@prefix oa: <http://www.w3.org/ns/oa#> .\n'
+        '@prefix schema: <https://schema.org/> .\n'
+        '<http://example.org/s> a sv:Source ; rdfs:label "S" ;\n'
+        '  schema:url "https://example.org/" .\n'
+        '<http://example.org/f> a sv:Fragment ; rdfs:label "F" ;\n'
+        '  oa:hasTarget [ a oa:SpecificResource ;\n'
+        '    oa:hasSource <http://example.org/s> ;\n'
+        '    oa:hasSelector [ a oa:TextQuoteSelector ;\n'
+        '      oa:exact "one", "two" ] ] .\n',
+        encoding="utf-8",
+    )
+    ctx = CLIContext(project_root=str(tmp_path), rdf_subdir="rdf",
+                     sources_cache_subdir="data/sources")
+    with pytest.raises(SystemExit) as exc:
+        ValidateCommand(ctx=ctx).run(graph=load_turtle(ttl), args=[], vetted=False)
+
+    assert exc.value.code == 1
+    assert "SHACL — FAILED" in capsys.readouterr().out

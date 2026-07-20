@@ -131,7 +131,12 @@ If no targetter is given, apysource checks the full page text for your snippet.
 ## YAML schema
 
 Each YAML file has a top-level `sources` list. Each source has nested `fragments`.
-An optional top-level `patterns` list says how to turn a *name* into a source.
+An optional top-level `patterns` list says how to turn a *name* into a source, and
+an optional top-level `base` names the identifiers the file mints.
+
+A fragment must say **at least one** of `snippet`, `section` or `selector` — those
+are what tie it to a place in its source. Without one it quotes nothing, so there
+is nothing to verify, and the file is refused rather than loaded.
 
 ### Source properties
 
@@ -260,6 +265,27 @@ line of a file — a footnote cites too. In the graph each entry becomes an
 `sv:CiteSite` linked by `prov:wasDerivedFrom` back to the fragment: the citing
 passage is derived from the cited one, not the reverse.
 
+### Naming what the file mints
+
+Your sources file *is* an RDF graph — `apysource emit sources.yaml -o out.ttl`
+writes it out as one, and `check --provenance` writes a record of a run.
+
+Identifiers for those are minted from labels, so by default two projects that both
+cite RFC 9110 § 7.2 mint the same `urn:apysource:fragment_rfc_9110_7_2`. That is
+harmless while the graph stays on your machine, and a merge hazard once it does
+not: RDF graphs are built to merge, and two citations that collide become one.
+
+Set a top-level `base` to an IRI you control and identifiers are minted under it:
+
+```yaml
+base: https://example.org/citations
+sources:
+  - label: RFC 9110
+```
+
+`emit` warns when it is about to write the default identifiers out. If you never
+publish the graph, you can ignore it.
+
 ## Library
 
 `apysource check` is one caller of the checks; your own generator can be
@@ -299,16 +325,20 @@ the line the name came from, so the refusal is yours to write.
 apysource [-c config.toml] <command> [args...]
 ```
 
-| Command                                        | What it does                                                  |
-|------------------------------------------------|---------------------------------------------------------------|
-| `check [sources.yaml] [--provenance file.ttl]` | Fetch, extract, and verify all snippets                       |
-| `locate <url> <snippet>`                       | Find a snippet in a page, show the targetter                  |
-| `add <file> <url-or-name> <snippet>`           | Locate a snippet and add it to a YAML file                    |
-| `validate`                                     | Check that `.ttl` files parse correctly (with optional SHACL) |
+| Command                                          | What it does                                                    |
+|--------------------------------------------------|-----------------------------------------------------------------|
+| `check [sources.yaml\|.ttl] [--provenance f.ttl]` | Fetch, extract, and verify all snippets                         |
+| `locate <url> <snippet>`                         | Find a snippet in a page, show the targetter                    |
+| `add <file> <url-or-name> <snippet>`             | Locate a snippet and add it to a YAML file                      |
+| `emit <sources.yaml\|.ttl> [-o out.ttl]`          | Write the citations out as RDF (turtle, json-ld, nt, xml)       |
+| `validate [sources.yaml\|.ttl]`                   | Parse and check against the SHACL shapes                        |
 
-Without `-c`, apysource uses built-in defaults (all built-in repos enabled). Pass `-c config.toml` to customize repos and HTTP settings (requires `pip install apysource[dev]`).
+`check`, `emit` and `validate` take either front-end: a `.yaml` sources file or a
+`.ttl` one. Without `-c`, apysource uses built-in defaults (all built-in repos enabled). Pass `-c config.toml` to customize repos and HTTP settings (requires `pip install apysource[dev]`).
 
-Pass `--provenance file.ttl` to `check` to write a PROV-O graph recording which fragments were verified, when, and by which activity.
+Pass `--provenance file.ttl` to `check` to write a self-contained PROV-O graph recording which fragments were verified, when, and by which run.
+
+SHACL validation needs `pip install apysource[shacl]`; without it the check reports SKIPPED rather than quietly passing.
 
 Fetched pages are cached on disk and reused indefinitely (no time-based expiry). Pass `--refresh` to `check`, `locate`, or `add` to bypass the cache and re-fetch. See [docs/advanced.md](docs/advanced.md#caching-and-freshness).
 

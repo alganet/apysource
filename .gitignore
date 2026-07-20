@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: ISC
 
+.venv/
 __pycache__/
 *.pyc
 *.egg-info/

@@ -86,6 +86,7 @@ For projects that already use RDF, you can define sources in Turtle instead of Y
 
 ```turtle
 @prefix sv:      <https://alganet.github.io/apysource/vocab.ttl#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix oa:      <http://www.w3.org/ns/oa#> .
 @prefix schema:  <https://schema.org/> .
@@ -116,7 +117,80 @@ ex:preamble a sv:Fragment ;
 
 The `sv:` vocabulary is intentionally minimal — it only defines classes and properties with no standard equivalent. Everything else uses standard properties directly.
 
-The RDF path requires a TOML config file (`-c`) to wire up the CLI context and repos. See `defaults.toml` for a full template.
+Pass a `.ttl` the same way you would pass a `.yaml`:
+
+```sh
+apysource check citations.ttl
+apysource validate citations.ttl
+```
+
+A whole *directory* of Turtle still needs a TOML config file (`-c`) to say where
+it is — that is what `rdf_subdir` sets. See `defaults.toml` for a full template.
+
+### What Turtle does not do
+
+A YAML source may name a family instead of an address — `label: RFC 9110` with no
+`url`, resolved by a pattern. That is a convenience for writing YAML by hand, and
+it is applied before the graph exists: by the time triples are minted the url is
+already there. A Turtle source writes its `schema:url` out. This is a deliberate
+line, not an oversight — an RDF author already has an identifier and a URL, and
+the two front-ends agree about everything downstream of the graph.
+
+### Validation
+
+Turtle gets no loader — there is nothing between `g.parse()` and the checks — so
+the SHACL shapes are what a Turtle author gets in place of the refusals a YAML
+author gets from `graph_from_data`. Both `check` and `validate` apply the shipped
+`shapes.ttl`, adding any `*shapes.ttl` your own project supplies.
+
+`check` runs them only for Turtle input. A graph the YAML loader built has
+already passed a stricter gate — unknown keys, non-scalar values, colliding
+identities and fragments that quote nothing are all refused there, and none of
+those are things SHACL can say.
+
+The shapes need `pyshacl`, which is an optional dependency:
+
+```sh
+pip install apysource[shacl]
+```
+
+Without it, the check reports **SKIPPED** rather than quietly passing.
+
+### Notes for RDF authors
+
+- **Labels may be language-tagged.** `rdfs:label "Aesop's Fables"@en` is fine, as
+  are several languages at once.
+- **`schema:url` may be an IRI or a string.** Both resolve the same way.
+- **A source may inherit its URL.** Give it `dcterms:isPartOf` a source that has
+  one — that is how a chapter names its book — and it needs no `schema:url` of
+  its own.
+- **Identifiers are file-scoped by default.** A YAML file with no `base:` mints
+  `urn:apysource:fragment_…` from labels, so two projects citing the same passage
+  mint the same identifier. Fine locally; a merge hazard once published. Set a
+  top-level `base:` to an IRI you control and identifiers are minted under it:
+
+  ```yaml
+  base: https://example.org/citations
+  sources:
+    - label: RFC 9110
+  ```
+
+  `apysource emit` warns when it is about to write the default identifiers out.
+- **`dcterms:format` is a plain media-type string**, not an IANA IRI. Short names
+  (`html`, `rfc`, `markdown`) work as well as full types (`text/html`).
+
+### Emitting RDF
+
+A YAML sources file *is* a graph — `apysource emit` writes it out as one:
+
+```sh
+apysource emit sources.yaml -o citations.ttl
+apysource emit sources.yaml --format json-ld
+apysource emit citations.ttl --format nt      # or convert between them
+```
+
+Formats: `turtle` (default), `json-ld`, `nt`, `xml`. What it writes conforms to
+the shipped shapes, so `apysource validate` accepts the file it produced.
 
 ### RDF properties
 
@@ -153,7 +227,7 @@ Properties unique to `sv:`:
 | `sv:sourceLocation`     | Opaque repo-specific location (e.g. `chapter:1`) |
 | `sv:sourceLines`        | Line range (e.g. `10-20`)                        |
 | `sv:edition`            | Edition or version string                        |
-| `sv:verificationStatus` | `verified`, `failed`, or `pending`               |
+| `sv:verificationStatus` | `verified`, `failed`, or `pending` — on a result |
 | `sv:citedBy`            | Fragment → a place that cites it                 |
 | `sv:citingFile`         | The file a citation is made in                   |
 | `sv:citingLine`         | The line it is made at (optional)                |
@@ -164,6 +238,10 @@ Everything above describes the *cited* side — the document, the section, the
 passage. `sv:CiteSite` is the other end:
 
 ```turtle
+@prefix sv:   <https://alganet.github.io/apysource/vocab.ttl#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix ex:   <http://example.org/rules#> .
+
 ex:host_header a sv:Fragment ;
     sv:citedBy [
         a sv:CiteSite ;
@@ -181,15 +259,53 @@ fragment can find its sites without scanning the graph in reverse.
 Not to be confused with `sv:sourceLocation` / `sv:sourceLines`, which say where in
 the *cited* document a passage lives. `sv:citingFile` is the opposite axis.
 
+### Verification provenance
+
+`apysource check --provenance run.ttl` writes what a run found. The verdict is its
+own entity rather than a property of the citation, because a verdict belongs to
+the run that reached it:
+
+```turtle
+@prefix sv:   <https://alganet.github.io/apysource/vocab.ttl#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix ex:   <http://example.org/rules#> .
+
+[] a sv:VerificationResult ;
+    sv:verificationStatus "verified" ;
+    prov:wasGeneratedBy [ a sv:VerificationActivity ;
+        prov:startedAtTime "2026-07-19T12:00:00+00:00"^^xsd:dateTime ;
+        prov:endedAtTime   "2026-07-19T12:00:04+00:00"^^xsd:dateTime ;
+        prov:used ex:host_header ] ;
+    prov:wasDerivedFrom ex:host_header .
+```
+
+The activity `prov:used` the fragments it examined. It did not *generate* them — a
+citation does not come into existence from the run that checks it; what the run
+generates is the finding.
+
+The file is self-contained: the fragments and sources it names are described in
+it, so it can be read without the sources file it came from.
+
 ### Vocabulary design
 
-The `sv:` namespace defines only what has no standard equivalent — 6 classes and 7 properties. Everything else uses established vocabularies directly:
+The `sv:` namespace defines only what has no standard equivalent — 7 classes and 7 properties. Everything else uses established vocabularies directly:
 
 - **Web Annotation (OA)**: Fragments are `oa:Annotation` instances. Source links, selectors, and snippet text all use native OA properties — no wrapper aliases.
 - **Dublin Core (dcterms)**: Source metadata (title, date, language, format, publisher, license) uses DC terms directly.
 - **BIBO**: Bibliographic identifiers (ISBN, DOI, page numbers) use BIBO properties directly.
-- **PROV-O**: Sources are `prov:Entity`. Verification activities use `prov:wasGeneratedBy`, `prov:startedAtTime`, `prov:endedAtTime`. Cite sites are `prov:Entity`, linked by `prov:wasDerivedFrom`.
-- **SHACL**: `vocab/shapes.ttl` validates Sources, Fragments, Terms, and Cite Sites.
+- **PROV-O**: Sources are `prov:Entity`. A verification activity `prov:used` the fragments it examined, and each `sv:VerificationResult` is `prov:wasGeneratedBy` it. Cite sites are `prov:Entity`, linked by `prov:wasDerivedFrom`.
+- **SHACL**: `apysource/vocab/shapes.ttl` validates Sources, Fragments, Terms, Cite Sites and verification provenance. It ships inside the package, so it applies wherever apysource is installed.
+
+`sv:citedBy` is *not* declared `owl:inverseOf prov:wasDerivedFrom`, though the
+prose invites it. `prov:wasDerivedFrom` is far more general, and the axiom would
+entail a citation edge for every unrelated derivation in a merged graph. Both
+directions are written out instead.
+
+The `rdfs:domain` and `rdfs:range` declarations in `vocab.ttl` are documentation
+of intent. Under RDFS entailment they would *assign* types rather than restrict
+them — a stray `sv:citingLine` would infer `sv:CiteSite` — so validation runs with
+inference off, and the shapes carry the constraints.
 
 ## Advanced: repository modules
 

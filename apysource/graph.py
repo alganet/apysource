@@ -12,6 +12,8 @@ from pathlib import Path
 
 from rdflib import Graph
 
+from apysource.namespaces import new_graph
+
 #: Separators before a role suffix — `spec-shapes.ttl`, `spec.shapes.ttl`.
 _ROLES = ("shapes", "inferred")
 
@@ -81,6 +83,23 @@ def load_triples_split(
             errors.append((str(f), str(e)))
 
     return g, shapes, errors
+
+
+def load_turtle(path: Path) -> Graph:
+    """Read one Turtle file, the way ``load_yaml`` reads one YAML file.
+
+    The counterpart that was missing. ``check`` and ``validate`` could be handed
+    a ``.yaml`` and would load it; handed a ``.ttl`` they matched no suffix, fell
+    through to scanning the configured RDF root, and passed the filename along as
+    an unrecognised positional — so the file named on the command line was never
+    opened, and nothing said so.
+
+    Prefixes are bound (via ``new_graph``) so anything re-serialized from here
+    comes back out readable rather than as a wall of full IRIs.
+    """
+    g = new_graph()
+    g.parse(str(path), format="turtle")
+    return g
 
 
 def local_name(uri) -> str:

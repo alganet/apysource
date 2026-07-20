@@ -100,3 +100,6 @@ http_client = "{http_client}"
 
 ["apysource.cli.add.AddCommand add_cmd"]
 http_client = "{http_client}"
+
+# Takes no wiring: a load and a serialize, both of which arrive as arguments.
+["apysource.cli.emit.EmitCommand emit_cmd"]

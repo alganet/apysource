@@ -42,6 +42,15 @@ class SourceSet:
     entries: dict[str, dict[str, Any]] = field(default_factory=dict)
     patterns: list[SourcePattern] = field(default_factory=list)
 
+    #: The file's own ``base:``, or ``""``.
+    #:
+    #: Kept because a generator writing a file of its own has to carry it
+    #: forward. Without it the base is silently dropped at exactly the moment it
+    #: matters: the *generated* file is the one that gets verified and emitted as
+    #: RDF, so an author who asked for identifiers under a name they control got
+    #: ``urn:apysource:`` back — the collide-on-merge form — and nothing said so.
+    base: str = ""
+
     def resolve(self, name: str) -> dict[str, Any] | None:
         """The source this name denotes — an entry, or a minted one, or ``None``.
 
@@ -80,7 +89,12 @@ def sources_from_data(data: object, origin: str = "<data>") -> SourceSet:
             )
         entries[completed["label"]] = completed
 
-    return SourceSet(entries=entries, patterns=patterns)
+    # Read after `graph_from_data`, which has already refused a base that is not
+    # an absolute IRI or that carries a fragment of its own — so what reaches a
+    # consumer here is a base the loader would accept back.
+    base = data.get("base") or "" if isinstance(data, dict) else ""
+
+    return SourceSet(entries=entries, patterns=patterns, base=str(base))
 
 
 def load_sources(path: Path | None) -> SourceSet:

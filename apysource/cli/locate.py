@@ -7,8 +7,8 @@
 import sys
 
 import yaml
-from rdflib import BNode, Literal
-from rdflib.namespace import RDF
+from rdflib import Literal
+from rdflib.namespace import RDF, RDFS
 
 from rdflib.namespace import DCTERMS
 
@@ -22,6 +22,7 @@ from apysource.formats import (
     normalize_mime_type,
 )
 from apysource.namespaces import OA, SCHEMA, SV, new_graph
+from apysource.yaml_input import _anon
 from apysource.sections import _section_label, locate_section, sections_containing
 
 
@@ -164,28 +165,64 @@ def format_yaml(url: str, content_type: str, snippet: str,
     return "\n".join(lines)
 
 
+def _turtle_labels(url: str, title: str, snippet: str,
+                   result: LocateResult) -> tuple[str, str]:
+    """Names for the source and the fragment this Turtle describes.
+
+    Both are required — `sv:SourceShape` and `sv:FragmentShape` each demand an
+    `rdfs:label`. They were not emitted, so the output of `--ttl`, whose entire
+    purpose is to be pasted into a `.ttl` file, did not conform to apysource's
+    own shapes: `validate` refused the file it had just been pasted into. Nothing
+    caught it because the shapes had never once run.
+
+    The YAML sibling writes `label: ""` and leaves naming to the author. Turtle
+    cannot — an empty label is a failed constraint, not a blank to fill — so
+    these are real names, derived from what the document and the citation already
+    say, and meant to be renamed.
+    """
+    source_label = title.strip() or url.rstrip("/").rsplit("/", 1)[-1] or url
+
+    # A section path names the passage better than the passage does. Failing
+    # that, enough of the quote to recognise it by.
+    if _targetter_key(result) == "section" and result.locator:
+        fragment_label = result.locator
+    else:
+        flat = " ".join(snippet.split())
+        fragment_label = flat[:60] + "…" if len(flat) > 60 else flat
+
+    return source_label, fragment_label or url
+
+
 def format_turtle(url: str, content_type: str, snippet: str,
-                  result: LocateResult) -> str:
+                  result: LocateResult, title: str = "") -> str:
     """Format a locate result as Turtle RDF with OA alignment."""
     g = new_graph()
-    source = BNode()
-    fragment = BNode()
+    # Labelled, not left to `BNode()`'s uuid: rdflib orders the objects of a
+    # predicate by blank-node identity, so a fragment with both a quote selector
+    # and a section selector printed them in a different order each run. This is
+    # output meant to be pasted into a file and committed.
+    source = _anon(url, "source")
+    fragment = _anon(url, "fragment")
+
+    source_label, fragment_label = _turtle_labels(url, title, snippet, result)
 
     g.add((source, RDF.type, SV.Source))
+    g.add((source, RDFS.label, Literal(source_label)))
     g.add((source, SCHEMA.url, Literal(url)))
     g.add((source, DCTERMS.format, Literal(normalize_mime_type(content_type))))
 
     g.add((fragment, RDF.type, SV.Fragment))
+    g.add((fragment, RDFS.label, Literal(fragment_label)))
     g.add((fragment, OA.motivatedBy, OA.identifying))
 
     # OA target → source + selectors
-    target = BNode()
+    target = _anon(url, "target")
     g.add((fragment, OA.hasTarget, target))
     g.add((target, RDF.type, OA.SpecificResource))
     g.add((target, OA.hasSource, source))
 
     # TextQuoteSelector from snippet
-    tqs = BNode()
+    tqs = _anon(url, "quote")
     g.add((target, OA.hasSelector, tqs))
     g.add((tqs, RDF.type, OA.TextQuoteSelector))
     g.add((tqs, OA.exact, Literal(snippet)))
@@ -193,12 +230,12 @@ def format_turtle(url: str, content_type: str, snippet: str,
     # Additional selector based on targetter type
     key = _targetter_key(result)
     if key == "selector":
-        css = BNode()
+        css = _anon(url, "css")
         g.add((target, OA.hasSelector, css))
         g.add((css, RDF.type, OA.CssSelector))
         g.add((css, RDF.value, Literal(result.locator)))
     elif key == "section":
-        fs = BNode()
+        fs = _anon(url, "section")
         g.add((target, OA.hasSelector, fs))
         g.add((fs, RDF.type, SV.SectionSelector))
         g.add((fs, RDF.value, Literal(result.locator)))
@@ -237,6 +274,6 @@ class LocateCommand:
             self.http_client, url, snippet, force=force)
 
         if ttl_mode:
-            print(format_turtle(url, content_type, snippet, result))
+            print(format_turtle(url, content_type, snippet, result, title))
         else:
             print(format_yaml(url, content_type, snippet, result))

@@ -539,3 +539,49 @@ pattern:
 sources:
   - label: "RFC 9110"
 """))
+
+
+# ── A fragment must point at something ───────────────────────────────────
+
+@pytest.mark.parametrize("frag", [
+    'label: F',
+    'label: F\n      location: "chapter:1"',
+    'label: F\n      lines: "1-5"',
+    'label: F\n      page_start: "1"',
+    'label: F\n      cited_by:\n      - file: a.rs',
+])
+def test_a_fragment_that_targets_nothing_is_refused(tmp_path, frag):
+    """It quotes nothing, so there is nothing to check.
+
+    These loaded, and emitted an `sv:Fragment` with no `oa:hasTarget` at all —
+    floating free of the source it claims to be part of. Nothing downstream can
+    use one: `_get_source` walks `oa:hasTarget`, finds nothing, and reports
+    `no_source`, which blames the *source* for a citation that never said what
+    it was quoting. The author believes a citation is being checked; none is.
+    """
+    with pytest.raises(ValueError, match="verifies nothing"):
+        load_yaml(_write(tmp_path, f"""
+sources:
+  - label: S
+    url: https://example.com/
+    fragments:
+    - {frag}
+"""))
+
+
+@pytest.mark.parametrize("key,value", [
+    ("snippet", '"a quote"'),
+    ("section", '"Chapter I"'),
+    ("selector", '"div.main p"'),
+])
+def test_any_one_of_the_three_is_enough(tmp_path, key, value):
+    """Each of them alone produces a target, so each alone is accepted."""
+    g = load_yaml(_write(tmp_path, f"""
+sources:
+  - label: S
+    url: https://example.com/
+    fragments:
+    - label: F
+      {key}: {value}
+"""))
+    assert len(g) > 0

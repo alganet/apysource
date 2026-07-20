@@ -1,0 +1,310 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+#
+# SPDX-License-Identifier: ISC
+
+# What a citations graph must say to be checkable.
+#
+# A YAML sources file is refused by a loader. A Turtle file is refused by these,
+# and by nothing else — so where the loader has a rule, this file needs the same
+# rule, or a Turtle author gets a weaker promise than a YAML one for writing the
+# same citation.
+#
+# Two families of constraint recur here, and both exist for the same reason:
+#
+#   maxCount 1 on anything the code reads with `g.value()`. rdflib picks
+#   *arbitrarily* among several, so two `oa:exact` under one selector is a
+#   fragment that verifies against a quote nobody can predict — and if the
+#   arbitrary pick lands on the honest one, a fabricated citation is reported
+#   green. That is the worst outcome this tool can produce, and in Turtle
+#   nothing else prevents it.
+#
+#   `sh:or` over xsd:string and rdf:langString wherever text is required.
+#   `sh:datatype xsd:string` alone rejects `"Aesop"@en` — the single most
+#   idiomatic thing an RDF author writes. These shapes carried that bug for as
+#   long as they were never run.
+#
+# One `sh:message` per property shape covers *every* constraint on it, so a
+# cardinality message and a datatype message bundled together produce an
+# actively false report: a fragment with one target and two quote selectors was
+# told "Fragment must have exactly one oa:hasTarget". Constraints of different
+# kinds therefore sit in separate property shapes on the same path, each saying
+# only what it actually checks.
+
+@prefix sv:      <https://alganet.github.io/apysource/vocab.ttl#> .
+@prefix sh:      <http://www.w3.org/ns/shacl#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix prov:    <http://www.w3.org/ns/prov#> .
+@prefix oa:      <http://www.w3.org/ns/oa#> .
+@prefix schema:  <https://schema.org/> .
+
+# ── Source shape ──────────────────────────────────────────────────────────
+
+sv:SourceShape a sh:NodeShape ;
+    sh:targetClass sv:Source ;
+    sh:property [
+        sh:path schema:url ;
+        sh:maxCount 1 ;
+        sh:message "A source has at most one schema:url — _resolve_source_url reads it with g.value(), and two would be one arbitrary pick"
+    ] ;
+    # A url of its own, *or* a parent to inherit one from. `_resolve_source_url`
+    # walks `dcterms:isPartOf` when a source carries no `schema:url`, which is
+    # how a chapter names its book and stops there — so a flat `minCount 1` here
+    # refused a shape the resolver was written to handle.
+    #
+    # This is the one place Turtle is *laxer* than YAML rather than stricter: the
+    # loader requires a url on every source (or a pattern that mints one), so the
+    # inherited-url form is reachable only from Turtle. That asymmetry is worth
+    # knowing about; it is the resolver's own contract that decides it, and the
+    # resolver accepts it.
+    sh:or (
+        [ sh:property [ sh:path schema:url ; sh:minCount 1 ] ]
+        [ sh:property [ sh:path dcterms:isPartOf ; sh:minCount 1 ] ]
+    ) ;
+    sh:message "Source must have a schema:url, or a dcterms:isPartOf naming a source that has one" ;
+    sh:property [
+        sh:path rdfs:label ;
+        sh:minCount 1 ;
+        sh:message "Source must have an rdfs:label"
+    ] ;
+    sh:property [
+        sh:path rdfs:label ;
+        sh:or ( [ sh:datatype xsd:string ] [ sh:datatype rdf:langString ] ) ;
+        sh:message "An rdfs:label is text, plain or language-tagged"
+    ] ;
+    # A `part_of` naming nobody unhooks a source from its book in silence — the
+    # loader refuses it by name, and this is the same refusal for a Turtle author.
+    sh:property [
+        sh:path dcterms:isPartOf ;
+        sh:class sv:Source ;
+        sh:message "dcterms:isPartOf must point at a sv:Source"
+    ] .
+
+# ── Fragment shape ────────────────────────────────────────────────────────
+
+sv:FragmentShape a sh:NodeShape ;
+    sh:targetClass sv:Fragment ;
+    # The Web Annotation model allows several targets; apysource allows one,
+    # because `_get_source` and `_get_snippet` read a target with `g.value()` and
+    # would check an arbitrary one of them while silently ignoring the rest. A
+    # citation that might be verified against either of two passages is not a
+    # citation. Write one fragment per target.
+    sh:property [
+        sh:path oa:hasTarget ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "Fragment must have exactly one oa:hasTarget — write one fragment per target"
+    ] ;
+    sh:property [
+        sh:path oa:hasTarget ;
+        sh:node sv:AnnotationTargetShape ;
+        sh:message "The fragment's oa:hasTarget is not a well-formed annotation target"
+    ] ;
+    sh:property [
+        sh:path rdfs:label ;
+        sh:minCount 1 ;
+        sh:message "Fragment must have an rdfs:label"
+    ] ;
+    sh:property [
+        sh:path rdfs:label ;
+        sh:or ( [ sh:datatype xsd:string ] [ sh:datatype rdf:langString ] ) ;
+        sh:message "An rdfs:label is text, plain or language-tagged"
+    ] ;
+    # '10-20', 1-based inclusive. `extract_content` parses this; a fragment whose
+    # line range it cannot read targets nothing.
+    sh:property [
+        sh:path sv:sourceLines ;
+        sh:maxCount 1 ;
+        sh:message "sv:sourceLines is read with g.value(); two would be one arbitrary pick"
+    ] ;
+    sh:property [
+        sh:path sv:sourceLines ;
+        sh:pattern "^[0-9]+(-[0-9]+)?$" ;
+        sh:message "sv:sourceLines is a line or a range, as in '10' or '10-20'"
+    ] ;
+    sh:property [
+        sh:path sv:sourceLocation ;
+        sh:maxCount 1 ;
+        sh:message "sv:sourceLocation is read with g.value(); two would be one arbitrary pick"
+    ] .
+
+# ── Annotation target shape (validates the OA chain) ─────────────────────
+
+sv:AnnotationTargetShape a sh:NodeShape ;
+    sh:property [
+        sh:path oa:hasSource ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class sv:Source ;
+        sh:message "Annotation target must link to exactly one sv:Source via oa:hasSource"
+    ] ;
+    # One selector of each kind, at most. `_get_selector_value` walks the
+    # selectors looking for a type and returns the first it finds a value on;
+    # a second selector of the same type is a second answer nobody chose.
+    sh:property [
+        sh:path oa:hasSelector ;
+        sh:qualifiedValueShape [ sh:class oa:TextQuoteSelector ] ;
+        sh:qualifiedMaxCount 1 ;
+        sh:message "At most one oa:TextQuoteSelector per target"
+    ] ;
+    sh:property [
+        sh:path oa:hasSelector ;
+        sh:qualifiedValueShape [ sh:class oa:CssSelector ] ;
+        sh:qualifiedMaxCount 1 ;
+        sh:message "At most one oa:CssSelector per target"
+    ] ;
+    sh:property [
+        sh:path oa:hasSelector ;
+        sh:qualifiedValueShape [ sh:class sv:SectionSelector ] ;
+        sh:qualifiedMaxCount 1 ;
+        sh:message "At most one sv:SectionSelector per target"
+    ] .
+
+# ── Selector shapes ───────────────────────────────────────────────────────
+#
+# The snippet is the whole point of a citation, and `_get_snippet` reads it with
+# `g.value()`. Two `oa:exact` on one selector is a coin toss over which quote
+# gets verified.
+
+sv:TextQuoteSelectorShape a sh:NodeShape ;
+    sh:targetClass oa:TextQuoteSelector ;
+    sh:property [
+        sh:path oa:exact ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "A TextQuoteSelector carries exactly one oa:exact — the quote"
+    ] ;
+    sh:property [
+        sh:path oa:exact ;
+        sh:or ( [ sh:datatype xsd:string ] [ sh:datatype rdf:langString ] ) ;
+        sh:message "oa:exact is text, plain or language-tagged"
+    ] .
+
+sv:CssSelectorShape a sh:NodeShape ;
+    sh:targetClass oa:CssSelector ;
+    sh:property [
+        sh:path rdf:value ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "A CssSelector carries exactly one rdf:value"
+    ] .
+
+sv:SectionSelectorShape a sh:NodeShape ;
+    sh:targetClass sv:SectionSelector ;
+    sh:property [
+        sh:path rdf:value ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "A SectionSelector carries exactly one rdf:value — the section path"
+    ] .
+
+# ── Cite site shape ───────────────────────────────────────────────────────
+
+sv:CiteSiteShape a sh:NodeShape ;
+    sh:targetClass sv:CiteSite ;
+    sh:property [
+        sh:path sv:citingFile ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "A cite site must name exactly one sv:citingFile — a site with no place is not a place"
+    ] ;
+    sh:property [
+        sh:path sv:citingFile ;
+        sh:datatype xsd:string ;
+        sh:message "sv:citingFile is a path, as a plain string"
+    ] ;
+    sh:property [
+        sh:path sv:citingLine ;
+        sh:maxCount 1 ;
+        sh:message "A cite site is made at one line, or at none"
+    ] ;
+    sh:property [
+        sh:path sv:citingLine ;
+        sh:datatype xsd:integer ;
+        sh:minInclusive 1 ;
+        sh:message "sv:citingLine, where present, is a 1-based line number"
+    ] .
+
+# ── Term shape ────────────────────────────────────────────────────────────
+
+sv:TermShape a sh:NodeShape ;
+    sh:targetClass sv:Term ;
+    sh:property [
+        sh:path schema:url ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "Term must have exactly one schema:url — resolve_direct reads it with g.value()"
+    ] ;
+    sh:property [
+        sh:path rdfs:label ;
+        sh:minCount 1 ;
+        sh:message "Term must have an rdfs:label"
+    ] ;
+    sh:property [
+        sh:path rdfs:label ;
+        sh:or ( [ sh:datatype xsd:string ] [ sh:datatype rdf:langString ] ) ;
+        sh:message "An rdfs:label is text, plain or language-tagged"
+    ] .
+
+# ── Verification provenance ───────────────────────────────────────────────
+#
+# What `check --provenance` writes. It had no shapes at all, which is how it came
+# to emit a graph of dangling references without anything noticing.
+
+sv:VerificationActivityShape a sh:NodeShape ;
+    sh:targetClass sv:VerificationActivity ;
+    sh:property [
+        sh:path prov:startedAtTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "A verification activity records exactly one prov:startedAtTime"
+    ] ;
+    sh:property [
+        sh:path prov:startedAtTime ;
+        sh:datatype xsd:dateTime ;
+        sh:message "prov:startedAtTime is an xsd:dateTime"
+    ] ;
+    sh:property [
+        sh:path prov:endedAtTime ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:dateTime ;
+        sh:message "prov:endedAtTime, where present, is a single xsd:dateTime"
+    ] .
+
+# Stated as prose in vocab.ttl since the property was minted; stated here as a
+# constraint, so a typo'd status is caught rather than reported.
+sv:VerificationStatusShape a sh:NodeShape ;
+    sh:targetSubjectsOf sv:verificationStatus ;
+    sh:property [
+        sh:path sv:verificationStatus ;
+        sh:maxCount 1 ;
+        sh:in ( "verified" "failed" "pending" ) ;
+        sh:message "sv:verificationStatus is one of 'verified', 'failed', 'pending'"
+    ] .
+
+# A verdict has to say whose it is and what it judged, or the provenance file
+# records an outcome belonging to no run and about no citation.
+sv:VerificationResultShape a sh:NodeShape ;
+    sh:targetClass sv:VerificationResult ;
+    sh:property [
+        sh:path sv:verificationStatus ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "A verification result must record exactly one sv:verificationStatus"
+    ] ;
+    sh:property [
+        sh:path prov:wasGeneratedBy ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class sv:VerificationActivity ;
+        sh:message "A verification result must name the run that produced it"
+    ] ;
+    sh:property [
+        sh:path prov:wasDerivedFrom ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class sv:Fragment ;
+        sh:message "A verification result must name the sv:Fragment it judged"
+    ] .

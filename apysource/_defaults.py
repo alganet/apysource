@@ -1,6 +1,7 @@
 import apysource.cli._base
 import apysource.cli.add
 import apysource.cli.check_sources
+import apysource.cli.emit
 import apysource.cli.locate
 import apysource.cli.validate
 import apysource.http
@@ -12,6 +13,11 @@ import apysource.repos.wikisource
 import apysource.repos.wiktionary
 
 class Compiled:
+
+    def emit_cmd(self):
+        if not hasattr(self, '_emit_cmd'):
+            self._emit_cmd = apysource.cli.emit.EmitCommand()
+        return self._emit_cmd
 
     def ctx(self):
         if not hasattr(self, '_ctx'):

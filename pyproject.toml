@@ -57,6 +57,20 @@ version = {attr = "apysource.__version__"}
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["apysource*"]
+# `apysource/vocab/` is data, not code. Left to its default (true), namespace
+# discovery would find it — no `__init__.py` is required for an implicit
+# namespace package — and make it `apysource.vocab`, a package in its own right.
+# `package-data` keyed on `apysource` would then no longer cover it, and the
+# wheel would ship no shapes at all: silently, with SHACL still reporting
+# "SKIPPED (no shapes found)". The fix would look applied and change nothing.
+namespaces = false
+
+# The shapes are the Turtle path's only validation, so they have to travel with
+# the code. They used to live in a top-level `vocab/`, which `include` above does
+# not match — an installed apysource carried no shapes at all, and every SHACL
+# run reported "SKIPPED (no shapes found)".
+[tool.setuptools.package-data]
+apysource = ["vocab/*.ttl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

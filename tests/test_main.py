@@ -22,8 +22,8 @@ class _FakeCommand:
     def __init__(self):
         self.calls = []
 
-    def run(self, graph=None, args=None):
-        self.calls.append({"graph": graph, "args": args})
+    def run(self, graph=None, args=None, vetted=False):
+        self.calls.append({"graph": graph, "args": args, "vetted": vetted})
 
 
 class _NoGraphCommand:
@@ -157,3 +157,57 @@ def test_config_flag_invokes_get_wiring(monkeypatch):
     main()
     assert captured["path"] == "custom.toml"
     assert cmd.calls == [{"args": []}]
+
+
+# ── A flag's value is not a positional ──────────────────────────────────
+
+class _ValueFlagCommand(_FakeCommand):
+    """A graph command with flags that consume the next argument."""
+
+    value_flags = ("--format", "-o", "--output")
+
+
+def test_a_flag_value_is_not_taken_as_the_input_file(monkeypatch, tmp_path):
+    """`emit -o out.ttl sources.yaml` must load sources.yaml, not out.ttl.
+
+    The scan matches on suffix, so adding `.ttl` to it made the *values* of
+    `-o`, `--provenance` and `--format` eligible. With the flag written first,
+    `out.ttl` was taken as the input graph and stripped from the arguments,
+    leaving `["-o", "sources.yaml"]` — so the command serialized the graph
+    **over the user's citations file** and exited 0. A tool for protecting
+    citations destroyed the citations.
+    """
+    yaml_file = tmp_path / "sources.yaml"
+    yaml_file.write_text(
+        "sources:\n  - label: S\n    url: http://x\n    fragments: []\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out.ttl"
+    out.write_text("@prefix ex: <http://x/> .\nex:a ex:b ex:c .\n", encoding="utf-8")
+
+    cmd = _ValueFlagCommand()
+    _run(monkeypatch, ["emit", "-o", str(out), str(yaml_file)],
+         _FakeWiring(emit_cmd=cmd))
+
+    call = cmd.calls[0]
+    assert call["vetted"] is True, "it must have loaded the YAML, not the .ttl"
+    # The flag and its value are passed through untouched for the command to parse.
+    assert call["args"] == ["-o", str(out)]
+
+
+def test_a_boolean_flag_before_the_file_still_finds_it(monkeypatch, tmp_path):
+    """The fix must not skip the argument after every flag.
+
+    `--refresh` takes no value, so the file after it is a real positional.
+    """
+    yaml_file = tmp_path / "sources.yaml"
+    yaml_file.write_text(
+        "sources:\n  - label: S\n    url: http://x\n    fragments: []\n",
+        encoding="utf-8",
+    )
+    cmd = _ValueFlagCommand()
+    _run(monkeypatch, ["check", "--refresh", str(yaml_file)],
+         _FakeWiring(check_sources_cmd=cmd))
+
+    assert cmd.calls[0]["graph"] is not None
+    assert cmd.calls[0]["args"] == ["--refresh"]

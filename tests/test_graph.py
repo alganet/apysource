@@ -10,7 +10,7 @@ from rdflib import Graph, URIRef
 
 from apysource.graph import local_name, load_triples, load_triples_split
 
-VOCAB_DIR = Path(__file__).resolve().parent.parent / "vocab"
+VOCAB_DIR = Path(__file__).resolve().parent.parent / "apysource" / "vocab"
 
 
 # ── load_triples ────────────────────────────────────────────────────────

@@ -58,7 +58,10 @@ _CITE_SITE_ALLOWED = {"file", "line"}
 # What the file itself may say. `patterns:` is meaningful now, and a typo'd
 # `pattern:` would otherwise be ignored — minting nothing, and leaving every
 # url-less source to fail with a message about the wrong thing entirely.
-_TOP_ALLOWED = {"sources", "patterns"}
+#
+# `base:` names the file's own identifiers. See `_make_uri` for why a file that
+# omits it gets identifiers that must not be merged with anyone else's.
+_TOP_ALLOWED = {"sources", "patterns", "base"}
 
 #: What a source may say, and what a fragment may say — as data, on purpose.
 #:
@@ -73,6 +76,20 @@ FRAGMENT_KEYS = frozenset(_FRAGMENT_ALLOWED)
 #: where in the source its quote lives. `label` names the citation, `snippet` is
 #: the quote itself, and `cited_by` is the citing side — none of them target.
 TARGETTING_KEYS = FRAGMENT_KEYS - {"label", "snippet", "cited_by"}
+
+#: The fragment keys that tie a citation to its source at all.
+#:
+#: A narrower set than ``TARGETTING_KEYS``, and a different question. That one
+#: asks *where in the document* a passage lives; this one asks whether the
+#: fragment says anything about the document **whatsoever**. Only these three
+#: produce the ``oa:hasTarget`` → ``oa:hasSource`` edge, so a fragment with none
+#: of them is an ``sv:Fragment`` floating free of the source it claims to quote:
+#: it resolves to ``no_source``, and it verifies nothing.
+#:
+#: ``location:``, ``lines:``, ``page_start:`` and ``cited_by:`` are all things a
+#: fragment may legally carry while saying none of these — which is how a
+#: citation could be written, loaded green, and checked never.
+TARGET_KEYS = frozenset({"snippet", "selector", "section"})
 
 
 def reject_unknown_keys(entry: dict, allowed: set[str], what: str) -> None:

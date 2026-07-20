@@ -212,3 +212,14 @@ class CheckResult:
     total: int
     failures: list[Failure] = field(default_factory=list)
     warnings: list[Failure] = field(default_factory=list)
+
+    #: Whether this check is about the *graph* rather than about any citation.
+    #:
+    #: The shape check is the one that is. It has to carry a ``total`` — a check
+    #: with none is rendered ``----`` and can never be a failure — but counting
+    #: it as work would defeat ``nothing_verified``: an empty Turtle project
+    #: would conform vacuously, one check would report 1/1, and a run that
+    #: verified no citation at all would go out green. That is precisely the
+    #: silent pass this tool exists to abolish, so it must not be reintroduced
+    #: by the machinery meant to strengthen it.
+    structural: bool = False

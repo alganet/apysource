@@ -14,6 +14,7 @@ and so that the README's import line is one that actually runs.
 __version__ = "0.5.2"
 
 from apysource.api import check_graph  # noqa: E402
+from apysource.emit import serialize  # noqa: E402
 from apysource.patterns import SourcePattern, mint_source, patterns_from_data  # noqa: E402
 from apysource.sources import SourceSet, load_sources, sources_from_data  # noqa: E402
 from apysource.yaml_input import graph_from_data, load_yaml  # noqa: E402
@@ -28,5 +29,6 @@ __all__ = [
     "load_yaml",
     "mint_source",
     "patterns_from_data",
+    "serialize",
     "sources_from_data",
 ]

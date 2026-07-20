@@ -281,10 +281,24 @@ def test_emit_provenance_returns_graph(capsys):
     assert start is not None
     assert end is not None
 
-    # Verified fragment has provenance
-    status = prov_graph.value(frag, SV.verificationStatus)
-    assert str(status) == "verified"
-    assert prov_graph.value(frag, PROV.wasGeneratedBy) == activity
+    # The run *used* the fragment. It did not generate it: a citation does not
+    # come into existence from the run that checks it, and the edge used to
+    # claim it did.
+    assert (activity, PROV.used, frag) in prov_graph
+    assert prov_graph.value(frag, PROV.wasGeneratedBy) is None
+
+    # The verdict is its own entity — it belongs to the run that reached it,
+    # not to the citation it judged.
+    verdicts = list(prov_graph.subjects(RDF.type, SV.VerificationResult))
+    assert len(verdicts) == 1
+    verdict = verdicts[0]
+    assert str(prov_graph.value(verdict, SV.verificationStatus)) == "verified"
+    assert prov_graph.value(verdict, PROV.wasGeneratedBy) == activity
+    assert prov_graph.value(verdict, PROV.wasDerivedFrom) == frag
+
+    # And the file stands on its own: the fragment it names is described here,
+    # not only in the sources graph the reader may not have.
+    assert (frag, RDF.type, SV.Fragment) in prov_graph
 
 
 # ── print_report ─────────────────────────────────────────────────────────
