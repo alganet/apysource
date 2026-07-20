@@ -11,7 +11,7 @@ and so that the README's import line is one that actually runs.
 #: Declared before the re-exports below, and it has to be: ``http`` reads it back
 #: off this package to build its User-Agent, so importing the API first would
 #: close the loop on a module that is still executing.
-__version__ = "0.5.2"
+__version__ = "0.6.0"
 
 from apysource.api import check_graph  # noqa: E402
 from apysource.emit import serialize  # noqa: E402

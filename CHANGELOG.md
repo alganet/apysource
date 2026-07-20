@@ -12,6 +12,69 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-20
+
+### Added
+- **`apysource emit`** writes a citations file out as RDF — turtle (default), json-ld,
+  n-triples or xml. A YAML sources file has always *been* a graph; there was no way to
+  get it back out. The serializing lives in `apysource.emit` and is exported as
+  `apysource.serialize`, so a generator writing citations of its own does not restate
+  what apysource RDF looks like.
+- **A `.ttl` is accepted wherever a `.yaml` is.** `check citations.ttl` and
+  `validate citations.ttl` previously matched no suffix, scanned the configured RDF root
+  instead, and passed the filename on as an unrecognised positional — the file named on
+  the command line was never opened.
+- **A top-level `base:` names the identifiers a file mints.** Without one they fall back
+  to `urn:apysource:fragment_<label>`, which is derived from a file-local label: two
+  projects citing RFC 9110 § 7.2 mint the same identifier, and merging their graphs
+  conflates the two citations. `emit` warns when it is about to write the default form.
+  `SourceSet.base` carries it so a generator can write it into a file of its own.
+- **The SHACL shapes ship inside the package and always run**, adding any shapes a
+  project supplies rather than being replaced by them. `check` applies them to Turtle
+  input only: a YAML-loaded graph has already passed a stricter gate.
+
+### Fixed
+- **The shapes had never run, and had rotted.** `vocab/` sat outside the package, so an
+  installed apysource carried no shapes and every SHACL step reported
+  `SKIPPED (no shapes found)`. Turning them on found they rejected
+  `rdfs:label "Aesop"@en` — language-tagged text is now accepted throughout.
+- **apysource emitted RDF its own validator rejected.** `locate --ttl` wrote a Source and
+  a Fragment with no `rdfs:label`, so `validate` refused the file its output had just been
+  pasted into.
+- **`check --provenance` wrote a file of dangling references.** It named fragment URNs and
+  said nothing else about them — no type, no label, no target — because those triples live
+  in the sources graph, which was never serialized alongside. The file is now
+  self-contained, including through a `dcterms:isPartOf` chain.
+- **PROV-O direction.** A verification run `prov:used` the fragments it examined; it did
+  not *generate* them. The verdict is a `sv:VerificationResult` belonging to the run that
+  reached it, rather than a property hanging off the citation. Every outcome is recorded,
+  including failures that previously returned before writing anything — a rejected
+  fragment was indistinguishable from one the run never reached.
+- **Emitted Turtle is byte-stable.** Blank nodes took a fresh uuid per process and rdflib
+  orders the objects of a predicate by blank-node identity, so serializing the same input
+  twice differed in 1498 lines on a real project. Labels now derive from the fragment they
+  belong to. Only turtle is stable; the other serializations name their blank nodes afresh
+  each run.
+- **A fragment that quotes nothing is refused at load**, rather than resolving to
+  `no_source` after a fetch and blaming the source for a citation that never said what it
+  was quoting. It must carry at least one of `snippet`, `selector` or `section`.
+- **`emit -o out.ttl sources.yaml` overwrote the sources file.** Adding `.ttl` to the
+  argument scan made flag *values* eligible as input files; commands now declare which of
+  their flags take a value. The same defect affected `check --provenance`.
+- Shape constraints of different kinds are separate property shapes, so a violation is
+  reported by the rule it broke — a fragment with one target and two quote selectors was
+  told it must have exactly one target.
+- `conforms` distinguishes "did not run" from "passed", and a shapes file pyshacl cannot
+  load is reported rather than raised.
+
+### Changed
+- **`sv:` gained `sv:VerificationResult`** for the outcome of one run against one
+  fragment. `sv:Fragment` is now also a `prov:Entity`. `owl:versionInfo` tracks the
+  release.
+- A source may inherit its url through `dcterms:isPartOf` instead of carrying one —
+  `_resolve_source_url` was already written to walk that chain, and no front-end could
+  express it.
+
 ## [0.5.2] - 2026-07-19
 
 ### Fixed
@@ -340,7 +403,8 @@ All notable changes to this project are documented here. The format is based on
 - Baseline release captured at the time this changelog was introduced. Earlier history was not
   recorded in release notes; see the git log for prior commits.
 
-[Unreleased]: https://github.com/alganet/apysource/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/alganet/apysource/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/alganet/apysource/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/alganet/apysource/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/alganet/apysource/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/alganet/apysource/compare/v0.4.0...v0.5.0
