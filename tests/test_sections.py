@@ -238,6 +238,32 @@ def test_html_sections_collect_lists_definitions_and_cells():
     assert "Quoted requirement." in section.paragraphs
 
 
+def test_html_sections_survive_an_unclosed_paragraph():
+    """The HTML standard leaves `<p>` unclosed, and `html.parser` does not close it.
+
+    One `<p>` then swallows every heading and section that follows it, so an
+    element wrapping a heading can be neither skipped as structure — that threw
+    away 7577 characters of one WHATWG page, and every quote in it — nor
+    collected whole, which would file four sections' text under the first. It
+    contributes what precedes its first nested heading; the rest lands under the
+    heading that opens it.
+    """
+    html = """<html><body>
+    <h2>7.7 The X-Frame-Options header</h2>
+    <p>X-Frame-Options controls framing.
+    <h2>7.8 The Refresh header</h2>
+    <p>It takes the same value and works largely the same.
+    </body></html>"""
+    root = HtmlFormat().sections(html)
+    xfo, refresh = root.children[0], root.children[1]
+    assert "X-Frame-Options controls framing." in " ".join(xfo.paragraphs)
+    assert "It takes the same value" in " ".join(refresh.paragraphs)
+    assert "It takes the same value" not in " ".join(xfo.paragraphs)
+
+    located = locate_section(html, "It takes the same value", HtmlFormat())
+    assert located is not None and located.locator == "§ 7.8"
+
+
 def test_html_sections_content_wrapping_a_heading_is_a_container():
     """A <li> holding an <h3> is structure, not a paragraph of the outer section.
 

@@ -12,6 +12,27 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **A `<p>` the document never closed no longer costs a section its text.** 0.8.0 began
+  attributing every content block to its section, and treated a content element wrapping
+  a heading as structure — skipping it whole, on the reasoning that a nested section
+  should keep its own text. Real documents make that reasoning expensive: the HTML
+  standard leaves `<p>` elements unclosed and `html.parser` does not close them, so one
+  `<p>` on the WHATWG speculative-loading page swallows two headings and **7577
+  characters**, and skipping it dropped every one of them out of the section tree. Such
+  an element now contributes the text that *precedes* its first nested heading, and the
+  walk goes on to visit its later descendants individually, each landing under the
+  heading that opens it.
+
+  This is strictly better than what the `<p>`-only walk did before 0.8.0, and it
+  corrects attributions that were quietly wrong then: on the WHATWG corpus a `Refresh`
+  header quote resolved to *"7.7 The `X-Frame-Options` header"* and now resolves to
+  *"7.8 The `Refresh` header"*; a `meta http-equiv` quote moved from *"4.2.4 The link
+  element"* to *"4.2.5.3 Pragma directives"*; and the preload cites moved from *"4.6.1
+  Introduction"* to *"4.6.8.20 Link type `preload`"*. Measured across a 90-fragment
+  corpus of live W3C and WHATWG documents: 12 quotes gained a section they could not
+  carry before, 9 were corrected, none lost one.
+
 ## [0.8.0] - 2026-08-06
 
 ### Fixed

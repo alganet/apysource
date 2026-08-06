@@ -191,6 +191,52 @@ def html_text(node) -> str:
     return "".join(out)
 
 
+#: The heading elements that open a section.
+HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
+
+
+def _text_until_heading(node, content_tags, collected: set[int]) -> tuple[str, bool]:
+    """``html_text``, stopped at the first heading descendant.
+
+    Returns the text and whether a heading ended it. An element that contains
+    a heading cannot be attributed to one section whole — the text after the
+    heading belongs to the section that heading opens — but it cannot be
+    dropped either, and dropping it is the bug this exists to prevent: the
+    HTML standard leaves ``<p>`` elements unclosed, and ``html.parser`` does
+    not close them, so a single ``<p>`` there swallows every heading and
+    section that follows it. Skipping such an element as "structure" threw
+    away 7577 characters of one WHATWG page.
+
+    So the element contributes what precedes its first heading, and the walk
+    goes on to visit its later descendants individually — each landing in the
+    section its own preceding heading opened, which is better than what the
+    ``<p>``-only walk did with the same page (one paragraph holding four
+    sections' text). Content elements consumed here are marked in
+    ``collected`` so the walk does not collect them a second time.
+    """
+    from bs4 import NavigableString
+
+    out: list[str] = []
+    for child in node.children:
+        if isinstance(child, NavigableString):
+            out.append(str(child))
+            continue
+        name = getattr(child, "name", None)
+        if name in NON_CONTENT_TAGS:
+            continue
+        if name in HEADING_TAGS:
+            return "".join(out), True
+        text, hit = _text_until_heading(child, content_tags, collected)
+        out.append(text)
+        if name in BLOCK_TAGS:
+            out.append("\n")
+        if hit:
+            return "".join(out), True
+        if name in content_tags:
+            collected.add(id(child))
+    return "".join(out), False
+
+
 class SoupCache(Protocol):
     """What ``HtmlFormat`` needs of a parse cache, and nothing more.
 
@@ -353,7 +399,7 @@ class HtmlFormat:
         from apysource.sections import SectionNode
 
         root = SectionNode(title="", level=0)
-        heading_tags = {"h1", "h2", "h3", "h4", "h5", "h6"}
+        heading_tags = HEADING_TAGS
         content_tags = self._SECTION_CONTENT_TAGS
 
         # Collect headings and content blocks in document order
@@ -385,18 +431,17 @@ class HtmlFormat:
 
             elif el.name in content_tags:
                 # The `<p>` in a collected `<li>` was already collected with
-                # its ancestor, whose `html_text` includes every descendant's.
-                if any(id(a) in collected for a in el.parents):
+                # its ancestor, whose text includes every descendant's.
+                if id(el) in collected or any(id(a) in collected
+                                              for a in el.parents):
                     continue
-                # An element wrapping a heading is a container, not content:
-                # collecting it whole would pull a nested section's text —
-                # title included — into the enclosing section. Its own
-                # children are judged one by one instead, so the ones after
-                # the heading land in the section that heading opens.
-                if el.find(heading_tags) is not None:
-                    continue
-                collected.add(id(el))
-                text = _normalize(html_text(el))
+                # Only what precedes a nested heading belongs to this section;
+                # anything after it belongs to the section that heading opens,
+                # and is collected when the walk reaches it.
+                raw, hit_heading = _text_until_heading(el, content_tags, collected)
+                if not hit_heading:
+                    collected.add(id(el))
+                text = _normalize(raw)
                 if text:
                     # Add paragraph to the most recent section
                     current = stack[-1][1] if stack else root
