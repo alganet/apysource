@@ -12,6 +12,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-06
+
 ### Fixed
 - **`locate` no longer says "not found" over a quote the document verifiably
   contains.** A snippet can verify while every locator fails to be minted — it spans
