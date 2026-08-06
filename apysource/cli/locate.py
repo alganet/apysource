@@ -4,6 +4,7 @@
 
 """Locate a snippet at a URL and emit YAML or TTL output."""
 
+import re
 import sys
 
 import yaml
@@ -20,6 +21,7 @@ from apysource.formats import (
     detect_format,
     locate_snippet,
     normalize_mime_type,
+    normalize_ws,
 )
 from apysource.namespaces import OA, SCHEMA, SV, new_graph
 from apysource.yaml_input import _anon
@@ -109,12 +111,40 @@ def find_snippet(http_client, url: str, snippet: str,
         _warn_if_ambiguous(body, snippet, fmt, result)
 
     if result is None:
+        result = _document_scoped(body, snippet, fmt)
+        if result is not None:
+            print("  Note: found, but no section or selector pins it — the "
+                  "quote locates itself,", file=sys.stderr)
+            print("        and the whole document is the passage it is "
+                  "verified against", file=sys.stderr)
+
+    if result is None:
         print(f"Error: snippet not found in {url}", file=sys.stderr)
         for line in explain_snippet_failure(snippet, _searchable_text(body, fmt)):
             print(f"  {line}", file=sys.stderr)
         sys.exit(1)
 
     return content_type, title, result
+
+
+def _document_scoped(body: str, snippet: str, fmt) -> LocateResult | None:
+    """The quote is in the document even though no targetter pins it.
+
+    A snippet can verify while every locator fails to be minted: it spans two
+    sibling elements no selectable ancestor gathers, or it sits in a document
+    whose structure the section grammar cannot address honestly. Verification
+    would still pass — a fragment with no targetter is checked against the
+    whole document, and that is a first-class shape, not a degenerate one.
+    Saying "not found" over it, with a closest match printed back at 100%,
+    made the verdict line untrustworthy in exactly the direction a pre-flight
+    check exists for. The containment asked here is the one verification asks,
+    trailing-ellipsis elision included.
+    """
+    norm = normalize_ws(snippet)
+    norm = re.sub(r"(\.\.\.|…)$", "", norm).strip()
+    if not norm or norm not in normalize_ws(_searchable_text(body, fmt)):
+        return None
+    return LocateResult(format_name="document", locator="", matched_text="")
 
 
 def _searchable_text(body: str, fmt) -> str:
@@ -134,8 +164,14 @@ def _searchable_text(body: str, fmt) -> str:
     return body
 
 
-def _targetter_key(result: LocateResult) -> str:
-    """Return the YAML key name for a locate result's targetter."""
+def _targetter_key(result: LocateResult) -> str | None:
+    """Return the YAML key name for a locate result's targetter.
+
+    ``None`` for a document-scoped result: the fragment carries no targetter
+    key at all, and the snippet locates itself.
+    """
+    if result.format_name == "document":
+        return None
     if result.format_name == "section":
         return "section"
     elif result.format_name == "html":
@@ -148,7 +184,9 @@ def format_yaml(url: str, content_type: str, snippet: str,
                 result: LocateResult) -> str:
     """Format a locate result as a YAML fragment block."""
     key = _targetter_key(result)
-    frag = {"label": "", key: result.locator, "snippet": snippet}
+    frag = {"label": "", "snippet": snippet}
+    if key is not None:
+        frag = {"label": "", key: result.locator, "snippet": snippet}
     # yaml.dump on a list gives a pasteable fragment entry
     body = yaml.dump([frag], default_flow_style=False, allow_unicode=True,
                      sort_keys=False).rstrip()

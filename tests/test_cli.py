@@ -84,6 +84,69 @@ def test_locate_not_found(capsys):
         cmd.run(args=["http://example.com/page", "nonexistent text xyz"])
 
 
+#: A quote spanning two sibling paragraphs no selectable ancestor gathers:
+#: every locator fails to be minted, yet the text plainly contains it.
+_SPANNING_PAGE = ("<html><body><p>The first rule holds.</p>"
+                  "<p>The second rule holds too.</p></body></html>")
+
+
+def test_locate_answers_found_when_only_the_document_pins_the_quote(capsys):
+    """A verifiable quote is never "not found" — the verdict line must be
+    trustworthy in both directions, because pre-flight leans on it."""
+    from apysource.cli.locate import LocateCommand
+
+    fetcher = MockFetcher(content=_SPANNING_PAGE)
+    cmd = LocateCommand(http_client=fetcher)
+    cmd.run(args=["http://example.com/page", "rule holds. The second rule"])
+
+    captured = capsys.readouterr()
+    assert "not found" not in captured.err
+    assert "Targetter: document" in captured.out
+    assert "snippet:" in captured.out
+    # No targetter key: the fragment is the whole-document shape.
+    assert "selector:" not in captured.out
+    assert "section:" not in captured.out
+    assert "lines:" not in captured.out
+
+
+def test_locate_document_scoped_applies_verifications_own_elision(capsys):
+    """A trailing ellipsis marks a deliberately elided quote, there as here."""
+    from apysource.cli.locate import LocateCommand
+
+    fetcher = MockFetcher(content=_SPANNING_PAGE)
+    cmd = LocateCommand(http_client=fetcher)
+    cmd.run(args=["http://example.com/page", "rule holds. The second rule…"])
+    assert "Targetter: document" in capsys.readouterr().out
+
+
+def test_locate_still_fails_when_the_quote_is_absent(capsys):
+    from apysource.cli.locate import LocateCommand
+
+    fetcher = MockFetcher(content=_SPANNING_PAGE)
+    cmd = LocateCommand(http_client=fetcher)
+    with pytest.raises(SystemExit, match="1"):
+        cmd.run(args=["http://example.com/page", "a sentence the page never says"])
+    assert "not found" in capsys.readouterr().err
+
+
+def test_add_writes_a_document_scoped_fragment_without_a_targetter(tmp_path, capsys):
+    from apysource.cli.add import AddCommand
+
+    yaml_path = tmp_path / "cites.yaml"
+    fetcher = MockFetcher(content=_SPANNING_PAGE)
+    cmd = AddCommand(http_client=fetcher)
+    cmd.run(args=[str(yaml_path), "http://example.com/page",
+                  "rule holds. The second rule"])
+
+    import yaml as yaml_lib
+    data = yaml_lib.safe_load(yaml_path.read_text())
+    frag = data["sources"][0]["fragments"][0]
+    assert frag["snippet"] == "rule holds. The second rule"
+    assert "selector" not in frag
+    assert "section" not in frag
+    assert "lines" not in frag
+
+
 def test_locate_usage(capsys):
     """LocateCommand prints usage when too few args."""
     from apysource.cli.locate import LocateCommand

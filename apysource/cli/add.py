@@ -153,16 +153,23 @@ class AddCommand:
             self.http_client, url, snippet, force=force)
         key = _targetter_key(result)
 
-        print(f"  Located: {result.format_name} → {result.locator}",
-              file=sys.stderr)
+        if key is None:
+            print("  Located: document-scoped — the quote locates itself",
+                  file=sys.stderr)
+        else:
+            print(f"  Located: {result.format_name} → {result.locator}",
+                  file=sys.stderr)
         if result.matched_text:
             preview = result.matched_text[:120]
             if len(result.matched_text) > 120:
                 preview += "..."
             print(f"  Matched: {preview}", file=sys.stderr)
 
-        # Build the fragment dict
-        frag = {"label": label, key: result.locator, "snippet": snippet}
+        # Build the fragment dict; a document-scoped one carries no targetter
+        # key, and the snippet locates itself.
+        frag = {"label": label, "snippet": snippet}
+        if key is not None:
+            frag = {"label": label, key: result.locator, "snippet": snippet}
 
         if source_entry is None:
             if name is not None:

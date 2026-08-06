@@ -13,6 +13,18 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **`locate` no longer says "not found" over a quote the document verifiably
+  contains.** A snippet can verify while every locator fails to be minted — it spans
+  two sibling elements no selectable ancestor gathers, or sits where the section
+  grammar cannot address honestly. `locate` then printed `Error: snippet not found`
+  with a closest match that was byte-identical to the query, so a store-verified quote
+  and an unquotable one produced the same verdict line — a pre-flight signal that could
+  not be trusted in either direction. When no targetter can be built but the
+  containment check verification itself uses (trailing-ellipsis elision included)
+  passes, `locate` and `add` now answer with a *document-scoped* fragment — no
+  targetter key, the quote locates itself — which has always been a first-class shape:
+  it is how RFC 1123 and RFC 9000 were cited while their headings were unaddressable.
+  "Not found" now means exactly that.
 - **An htmlized RFC rendition is read as HTML, not as RFC text with the markup left
   in.** rfc-editor's htmlized pages open at a `<pre>` with no doctype, `<head>` or
   `<body>` anywhere in the file, so `looks_like_html` said no and the RFC text format
