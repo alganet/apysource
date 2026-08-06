@@ -12,6 +12,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-06
+
 ### Fixed
 - **A `<p>` the document never closed no longer costs a section its text.** 0.8.0 began
   attributing every content block to its section, and treated a content element wrapping
