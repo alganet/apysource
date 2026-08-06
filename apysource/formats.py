@@ -307,6 +307,20 @@ class HtmlFormat:
         """
         return self.text(body)
 
+    #: Elements whose rendered text belongs to the section whose heading
+    #: precedes them. `p` alone used to be the whole set, which made a section
+    #: selector blind to everything a document renders outside a paragraph:
+    #: the ABNF in a `<pre>` was unreachable under `§ 2` while the prose beside
+    #: it resolved fine, and grammars are exactly what W3C and WHATWG sources
+    #: put in `<pre>`. The others are the same omission one element over — a
+    #: requirement in a `<li>`, a definition in a `<dd>`, a value in a `<td>`.
+    #: Container blocks (`div`, `section`, `table`, `ul`…) stay out: collecting
+    #: one would hand a section every descendant's text in one lump, including
+    #: text on the far side of a nested heading.
+    _SECTION_CONTENT_TAGS = frozenset({
+        "p", "pre", "li", "blockquote", "dd", "dt", "td", "th", "figcaption",
+    })
+
     def sections(self, body: str):
         """Build a SectionNode tree from HTML headings."""
         from bs4 import Tag
@@ -314,13 +328,17 @@ class HtmlFormat:
 
         root = SectionNode(title="", level=0)
         heading_tags = {"h1", "h2", "h3", "h4", "h5", "h6"}
+        content_tags = self._SECTION_CONTENT_TAGS
 
-        # Collect all headings and paragraphs in document order
+        # Collect headings and content blocks in document order
         content_area = self._content(body)
-        elements = content_area.find_all(heading_tags | {"p"})
+        elements = content_area.find_all(heading_tags | content_tags)
 
         # Stack of (level, SectionNode) for nesting
         stack: list[tuple[int, SectionNode]] = [(0, root)]
+        # Content elements already collected, by identity. A descendant of one
+        # is not collected again — its text arrived with its ancestor's.
+        collected: set[int] = set()
 
         for el in elements:
             if not isinstance(el, Tag):
@@ -339,7 +357,19 @@ class HtmlFormat:
                 parent.children.append(node)
                 stack.append((level, node))
 
-            elif el.name == "p":
+            elif el.name in content_tags:
+                # The `<p>` in a collected `<li>` was already collected with
+                # its ancestor, whose `html_text` includes every descendant's.
+                if any(id(a) in collected for a in el.parents):
+                    continue
+                # An element wrapping a heading is a container, not content:
+                # collecting it whole would pull a nested section's text —
+                # title included — into the enclosing section. Its own
+                # children are judged one by one instead, so the ones after
+                # the heading land in the section that heading opens.
+                if el.find(heading_tags) is not None:
+                    continue
+                collected.add(id(el))
                 text = _normalize(html_text(el))
                 if text:
                     # Add paragraph to the most recent section

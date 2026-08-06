@@ -198,6 +198,77 @@ def test_html_sections_nested():
     assert part.children[1].title == "Chapter 2"
 
 
+def test_html_sections_own_the_pre_beside_their_prose():
+    """A section's <pre> is its content, exactly as its <p> is.
+
+    Only <p> used to be collected, so on a W3C-style page the ABNF in a
+    section's <pre> was unreachable under a section selector while the prose
+    one element up resolved fine — locate then fell back to a CSS selector for
+    the grammar and named the same section for the sentence beside it.
+    """
+    html = """<html><body><main>
+    <h2>2. The Server-Timing Header Field</h2>
+    <p>The Server-Timing header field is used to communicate metrics.</p>
+    <pre>Server-Timing = #server-timing-metric</pre>
+    </main></body></html>"""
+    fmt = HtmlFormat()
+    section = fmt.sections(html).children[0]
+    assert "Server-Timing = #server-timing-metric" in section.paragraphs
+
+    located = locate_section(html, "Server-Timing = #server-timing-metric", fmt)
+    assert located is not None
+    assert located.format_name == "section"
+    assert located.locator == "§ 2"
+
+
+def test_html_sections_collect_lists_definitions_and_cells():
+    html = """<html><body>
+    <h1>Requirements</h1>
+    <ul><li>The user agent MUST reconnect.</li></ul>
+    <dl><dt>metric</dt><dd>A named measurement.</dd></dl>
+    <table><tr><th>Name</th><td>Value</td></tr></table>
+    <blockquote>Quoted requirement.</blockquote>
+    </body></html>"""
+    section = HtmlFormat().sections(html).children[0]
+    assert "The user agent MUST reconnect." in section.paragraphs
+    assert "metric" in section.paragraphs
+    assert "A named measurement." in section.paragraphs
+    assert "Name" in section.paragraphs
+    assert "Value" in section.paragraphs
+    assert "Quoted requirement." in section.paragraphs
+
+
+def test_html_sections_content_wrapping_a_heading_is_a_container():
+    """A <li> holding an <h3> is structure, not a paragraph of the outer section.
+
+    Collecting it whole would copy the nested section's title into a paragraph
+    of the enclosing section and strand the nested section empty. Its children
+    are judged one by one instead, so text after the heading belongs to the
+    section that heading opens.
+    """
+    html = """<html><body>
+    <h1>Outer</h1>
+    <ul><li><h3>Inner Title</h3><p>Inner body requirement.</p></li></ul>
+    </body></html>"""
+    outer = HtmlFormat().sections(html).children[0]
+    assert outer.paragraphs == []
+    inner = outer.children[0]
+    assert inner.title == "Inner Title"
+    assert inner.paragraphs == ["Inner body requirement."]
+
+
+def test_html_sections_do_not_collect_nested_content_twice():
+    """A <p> inside a <li> arrives once, as part of the <li>'s own text."""
+    html = """<html><body>
+    <h1>Steps</h1>
+    <ul><li><p>Run the algorithm.</p><pre>step = 1</pre></li></ul>
+    </body></html>"""
+    section = HtmlFormat().sections(html).children[0]
+    assert len(section.paragraphs) == 1
+    assert "Run the algorithm." in section.paragraphs[0]
+    assert "step = 1" in section.paragraphs[0]
+
+
 # ── Markdown section tree ─────────────────────────────────────────────
 
 def test_markdown_sections_basic():

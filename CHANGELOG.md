@@ -12,6 +12,27 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **A section selector on an HTML source now reaches the section's `<pre>` — and its
+  lists, definitions, table cells, blockquotes and figcaptions.** Only `<p>` elements
+  were ever attributed to a section, so on a W3C-style page the ABNF in a section's
+  `<pre>` was unreachable under `§ 2` while the prose one element up resolved fine;
+  `locate` then reported a CSS selector for the grammar and a section selector for the
+  sentence beside it, on the same section. Grammars are exactly what W3C and WHATWG
+  documents put in `<pre>`, so the miss fell on the most load-bearing content those
+  sources have. Container blocks (`div`, `section`, `table`, `ul`…) are deliberately
+  still not collected — one of those would hand a section every descendant's text in a
+  single lump — and a content element nested inside another (the `<p>` in a `<li>`)
+  arrives once, as part of its ancestor's text. A content element that *wraps a
+  heading* is treated as structure rather than collected whole, so a nested section
+  keeps its own text instead of donating it, title included, to the section above.
+
+  Upgrade note: a previously minted `…, paragraph N` selector over an HTML source can
+  shift, because elements that were invisible now occupy ordinals. The failure is loud
+  — the snippet-containment check refuses the wrong paragraph — and re-locating mints
+  the current ordinal. Plain section selectors and snippet verification are unaffected;
+  sections only gained text.
+
 ## [0.7.0] - 2026-07-20
 
 ### Added
