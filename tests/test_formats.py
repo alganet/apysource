@@ -106,6 +106,49 @@ def test_detect_html_body():
     assert detect_format("  \n<body>content</body>").name == "html"
 
 
+#: The shape of an rfc-editor htmlized rendition: no doctype, no head, no
+#: body — the file opens at a `<pre>` and references are inline anchors.
+_HTMLIZED_RFC = """<pre>Internet Engineering Task Force (IETF)          M. Nottingham
+Request for Comments: 8288                                  October 2017
+
+<span class="h1">Web Linking</span>
+
+   o  Language-Tag from [<a href="./rfc5646" title="Tags">RFC5646</a>].
+</pre>"""
+
+
+def test_detect_htmlized_rfc_as_html():
+    """A body that opens at an HTML tag is HTML, declared or not.
+
+    Read as RFC text, an htmlized rendition keeps its markup in the text, so
+    every `[<a …>RFC5646</a>]` reference splits the sentence it sits in and a
+    quote spanning one fails with a closest match ending at the bracket.
+    """
+    assert detect_format(_HTMLIZED_RFC).name == "html"
+
+
+def test_htmlized_rfc_quote_spans_an_inline_reference():
+    fmt = detect_format(_HTMLIZED_RFC)
+    result = fmt.locate(_HTMLIZED_RFC, "Language-Tag from [RFC5646].")
+    assert result is not None
+    assert result.format_name == "html"
+
+
+def test_detect_markdown_autolink_is_not_html():
+    md = "<https://example.com> is the place.\n\n# Heading\n"
+    assert detect_format(md).name == "markdown"
+
+
+def test_detect_leading_comment_decides_nothing():
+    """Markdown and wikitext open with `<!-- … -->` too — sniff what follows."""
+    md = "<!-- omit in toc -->\n# Heading\n\nProse.\n"
+    assert detect_format(md).name == "markdown"
+    wiki = "<!-- Please do not add fluff -->\n{{Infobox}}\n== History ==\nText.\n"
+    assert detect_format(wiki).name == "wikitext"
+    html = "<!-- generated -->\n<div id=\"main\"><p>Prose.</p></div>"
+    assert detect_format(html).name == "html"
+
+
 def test_detect_plain_text():
     assert detect_format("Just some plain text\nwith lines").name == "plain-text"
 

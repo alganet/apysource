@@ -205,6 +205,23 @@ class SoupCache(Protocol):
         ...
 
 
+#: An HTML tag a document can *open* with, after the WHATWG mime-sniffing
+#: standard's table for identifying an unknown type as HTML — plus ``pre``,
+#: because rfc-editor's htmlized renditions begin with one. The terminator
+#: matters: ``<h1`` is HTML where ``<https://…>``, a Markdown autolink, is not,
+#: and the character after the name is what tells them apart. A comment is
+#: deliberately not in the set: Markdown and wikitext open with ``<!-- … -->``
+#: too, so a leading comment decides nothing — what follows it is sniffed
+#: instead.
+_HTML_OPENING_TAG = re.compile(
+    r"<(?:!doctype|html|head|body|pre|script|iframe|h[1-6]|div|font|"
+    r"table|a|style|title|b|br|p)[\s>/]",
+)
+
+#: Leading ``<!-- … -->`` comments, skipped before sniffing the opening tag.
+_LEADING_COMMENTS = re.compile(r"^(?:<!--.*?-->\s*)+", re.DOTALL)
+
+
 def looks_like_html(body: str) -> bool:
     """Does this document open like HTML?
 
@@ -214,9 +231,18 @@ def looks_like_html(body: str) -> bool:
     that runs for every extraction. A format instance is not what the question
     needs, and building one per call quietly ties the answer to whatever state
     the class may grow later.
+
+    A body whose first non-whitespace characters are an opening HTML tag is
+    HTML even when nothing declares it: rfc-editor's htmlized renditions start
+    at ``<pre>`` with no doctype, head or body anywhere in the file. Read as
+    text, their markup stays in the text — every ``[<a href=…>RFC5646</a>]``
+    reference then splits the sentence it sits in, which surfaced as citations
+    unfindable past a bracketed reference.
     """
     head = body[:1000].lstrip().lower()
     if head[:9].startswith("<!doctype") or head[:5].startswith("<html"):
+        return True
+    if _HTML_OPENING_TAG.match(_LEADING_COMMENTS.sub("", head)):
         return True
     return "<head" in head or "<body" in head
 

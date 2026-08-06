@@ -13,6 +13,18 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **An htmlized RFC rendition is read as HTML, not as RFC text with the markup left
+  in.** rfc-editor's htmlized pages open at a `<pre>` with no doctype, `<head>` or
+  `<body>` anywhere in the file, so `looks_like_html` said no and the RFC text format
+  claimed the body — markup and all. Every `[<a href=…>RFC5646</a>]` reference then
+  split the sentence it sat in: a quote spanning one was unfindable at any length, with
+  closest matches ending exactly at the bracket. The defect was filed as the extractor
+  segmenting passages at inline anchors; re-deriving it found no such segmentation —
+  the HTML reader, which renders anchors inline, was simply never running. Detection
+  now also sniffs an *opening* HTML tag, after the WHATWG mime-sniffing standard's
+  table for identifying an unknown type as HTML (plus `pre`, the htmlized opener); a
+  Markdown autolink (`<https://…>`) stays Markdown, because the character after the
+  name is what tells `<h1` from `<https`.
 - **A section selector on an HTML source now reaches the section's `<pre>` — and its
   lists, definitions, table cells, blockquotes and figcaptions.** Only `<p>` elements
   were ever attributed to a section, so on a W3C-style page the ABNF in a section's
