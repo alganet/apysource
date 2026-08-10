@@ -58,6 +58,20 @@ mdn_base_url = "https://raw.githubusercontent.com/mdn/content/main/files"
 # per-repo delay, a page set with 60 MDN citations would take three minutes.
 mdn_crawl_delay = 0.5
 
+# One document, several renditions, one key: the extension is not part of what
+# an RFC *is*, so rfc9110.txt, rfc9110.html and datatracker's /doc/html/rfc9110
+# are one cache entry. `/info/rfc9110` is a metadata page and stays unclaimed.
+rfc_url_pattern = "(?:rfc-editor\\.org/rfc|datatracker\\.ietf\\.org/doc/html|ietf\\.org/archive/id)/((?:rfc|bcp|std)\\d+|draft-[a-zA-Z0-9][a-zA-Z0-9.\\-]*?)(?:\\.[a-z]+)?(?:$|[/?#])"
+rfc_base_url = "https://www.rfc-editor.org/rfc"
+# rfc-editor publishes no drafts, and the I-D archive serves a 2012 draft only
+# as plain text. Datatracker's rendering of the same draft is the only rendition
+# of it that carries section anchors, so that is what an archive URL is answered
+# from.
+rfc_draft_base_url = "https://datatracker.ietf.org/doc/html"
+# No rfc_crawl_delay, and that is the decision: MDN sets one because
+# raw.githubusercontent is a CDN. rfc-editor is a courtesy-bound origin server,
+# so this repo takes the registry's default_crawl_delay.
+
 # ── HTTP client ──────────────────────────────────────────────────────────
 
 ["apysource.http.CachedFetcher http_client"]
@@ -91,10 +105,15 @@ url_pattern = "{mdn_url_pattern}"
 base_url = "{mdn_base_url}"
 crawl_delay = "{mdn_crawl_delay}"
 
+["apysource.repos.rfc.RfcRepo repo_rfc"]
+url_pattern = "{rfc_url_pattern}"
+base_url = "{rfc_base_url}"
+draft_base_url = "{rfc_draft_base_url}"
+
 # ── Registry (shared cache_dir, http_client and crawl delay for repos) ───
 
 ["apysource.repos.RepoRegistry registry"]
-repos = ["{repo_archive}", "{repo_gutenberg}", "{repo_mdn}", "{repo_wikisource}", "{repo_wiktionary}"]
+repos = ["{repo_archive}", "{repo_gutenberg}", "{repo_mdn}", "{repo_rfc}", "{repo_wikisource}", "{repo_wiktionary}"]
 sources_cache_dir = "{sources_cache_subdir}"
 http_client = "{http_client}"
 default_crawl_delay = "{default_crawl_delay}"

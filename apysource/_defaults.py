@@ -9,6 +9,7 @@ import apysource.repos
 import apysource.repos.archive
 import apysource.repos.gutenberg
 import apysource.repos.mdn
+import apysource.repos.rfc
 import apysource.repos.wikisource
 import apysource.repos.wiktionary
 
@@ -54,6 +55,11 @@ class Compiled:
             self._repo_mdn = apysource.repos.mdn.MdnRepo(url_pattern=self.mdn_url_pattern(), base_url=self.mdn_base_url(), crawl_delay=self.mdn_crawl_delay())
         return self._repo_mdn
 
+    def repo_rfc(self):
+        if not hasattr(self, '_repo_rfc'):
+            self._repo_rfc = apysource.repos.rfc.RfcRepo(url_pattern=self.rfc_url_pattern(), base_url=self.rfc_base_url(), draft_base_url=self.rfc_draft_base_url())
+        return self._repo_rfc
+
     def validate_cmd(self):
         if not hasattr(self, '_validate_cmd'):
             self._validate_cmd = apysource.cli.validate.ValidateCommand(ctx=self.ctx())
@@ -71,7 +77,7 @@ class Compiled:
 
     def registry(self):
         if not hasattr(self, '_registry'):
-            self._registry = apysource.repos.RepoRegistry(repos=[self.repo_archive(), self.repo_gutenberg(), self.repo_mdn(), self.repo_wikisource(), self.repo_wiktionary()], sources_cache_dir=self.sources_cache_subdir(), http_client=self.http_client(), default_crawl_delay=self.default_crawl_delay())
+            self._registry = apysource.repos.RepoRegistry(repos=[self.repo_archive(), self.repo_gutenberg(), self.repo_mdn(), self.repo_rfc(), self.repo_wikisource(), self.repo_wiktionary()], sources_cache_dir=self.sources_cache_subdir(), http_client=self.http_client(), default_crawl_delay=self.default_crawl_delay())
         return self._registry
 
     def check_sources_cmd(self):
@@ -141,4 +147,13 @@ class Compiled:
 
     def mdn_crawl_delay(self):
         return 0.5
+
+    def rfc_url_pattern(self):
+        return '(?:rfc-editor\\.org/rfc|datatracker\\.ietf\\.org/doc/html|ietf\\.org/archive/id)/((?:rfc|bcp|std)\\d+|draft-[a-zA-Z0-9][a-zA-Z0-9.\\-]*?)(?:\\.[a-z]+)?(?:$|[/?#])'
+
+    def rfc_base_url(self):
+        return 'https://www.rfc-editor.org/rfc'
+
+    def rfc_draft_base_url(self):
+        return 'https://datatracker.ietf.org/doc/html'
 compiled = Compiled()

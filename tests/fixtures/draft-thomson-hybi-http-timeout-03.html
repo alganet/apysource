@@ -1,0 +1,1667 @@
+
+<!DOCTYPE html>
+
+
+
+
+
+
+
+<html data-bs-theme="auto" lang="en">
+    <head>
+        
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <title>
+            
+                draft-thomson-hybi-http-timeout-03
+            
+        </title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link href="https://static.ietf.org/fonts/inter/import.css" rel="stylesheet">
+        <link href="https://static.ietf.org/fonts/noto-sans-mono/import.css" rel="stylesheet">
+        
+            <link rel="stylesheet" href="https://static.ietf.org/dt/12.70.0/ietf/css/document_html_referenced.css">
+            
+            <script type="module" crossorigin="" src="https://static.ietf.org/dt/12.70.0/assets/embedded-2377a63b.js"></script>
+<link href="https://static.ietf.org/dt/12.70.0/assets/create-pinia-singleton-510f8001.js" type="text/javascript" crossorigin="anonymous" rel="modulepreload" as="script" />
+<link href="https://static.ietf.org/dt/12.70.0/assets/Scrollbar-c6614013.js" type="text/javascript" crossorigin="anonymous" rel="modulepreload" as="script" />
+            <script src="https://static.ietf.org/dt/12.70.0/ietf/js/document_html.js"></script>
+            <script src="https://static.ietf.org/dt/12.70.0/ietf/js/theme.js"></script>
+        
+        <link rel="alternate" type="application/atom+xml" title="Document changes" href="/feed/document-changes/draft-thomson-hybi-http-timeout/">
+        <meta name="description"
+            
+                content="Hypertext Transfer Protocol (HTTP) Keep-Alive Header (Internet-Draft, 2013)"
+            >
+        
+
+<link rel="apple-touch-icon"
+      sizes="180x180"
+      href="https://static.ietf.org/dt/12.70.0/ietf/images/ietf-logo-nor-180.png">
+<link rel="icon"
+      sizes="32x32"
+      href="https://static.ietf.org/dt/12.70.0/ietf/images/ietf-logo-nor-32.png">
+<link rel="icon"
+      sizes="16x16"
+      href="https://static.ietf.org/dt/12.70.0/ietf/images/ietf-logo-nor-16.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="mask-icon"
+      href="https://static.ietf.org/dt/12.70.0/ietf/images/ietf-logo-nor-mask.svg"
+      color="#ffffff">
+<meta name="msapplication-TileColor"
+      content="#ffffff">
+<meta name="theme-color"
+      content="#ffffff">
+        
+
+
+
+
+<meta property="og:title" content="Hypertext Transfer Protocol (HTTP) Keep-Alive Header">
+<meta property="og:url" content="https://datatracker.ietf.org/doc/html/draft-thomson-hybi-http-timeout-03">
+<link rel="canonical" href="https://datatracker.ietf.org/doc/html/draft-thomson-hybi-http-timeout-03">
+<meta property="og:site_name" content="IETF Datatracker">
+<meta property="og:description" content="A Keep-Alive header is defined for HTTP. This hop-by-hop header informs hosts about connection management policies. A parameters is defined for idle connection timeout.">
+<meta property="og:type" content="article">
+
+<meta property="article:section" content="Individual Internet-Draft">
+
+<meta property="article:author" content="Martin Thomson">
+<meta property="article:author" content="Salvatore Loreto">
+<meta property="article:author" content="Greg Wilkins">
+
+
+
+        
+        <style>
+            
+            .diff-form .select2-selection__rendered {
+                direction: rtl;
+                text-align: left;
+            }
+        </style>
+    </head>
+    <body>
+        
+        <noscript><iframe class="status" title="Site status" src="/status/latest"></iframe></noscript>
+<div class="vue-embed" data-component="Status"></div>
+        <div class="btn-toolbar sidebar-toolbar position-fixed top-0 end-0 m-2 m-lg-3 d-print-none">
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary btn-sm me-1 dropdown-toggle d-flex align-items-center"
+                    id="bd-theme" type="button" aria-expanded="false" data-bs-toggle="dropdown"
+                    aria-label="Toggle theme">
+                        <i class="theme-icon-active bi bi-circle-half"></i>
+                </button>
+
+                <ul class="dropdown-menu" aria-labelledby="bd-theme">
+                    <li>
+                        <button type="button" class="dropdown-item d-flex align-items-center"
+                            data-bs-theme-value="light" aria-pressed="false">
+                            <i class="me-2 opacity-50 theme-icon bi bi-sun-fill"></i>
+                            Light<i class="bi bi-check2 ms-auto d-none"></i>
+                        </button>
+                    </li>
+                    <li>
+                        <button type="button" class="dropdown-item d-flex align-items-center"
+                            data-bs-theme-value="dark" aria-pressed="false">
+                            <i class="me-2 opacity-50 theme-icon bi bi-moon-stars-fill"></i>
+                            Dark<i class="bi bi-check2 ms-auto d-none"></i>
+                        </button>
+                    </li>
+                    <li>
+                        <button type="button" class="dropdown-item d-flex align-items-center active"
+                            data-bs-theme-value="auto" aria-pressed="true">
+                            <i class="me-2 opacity-50 theme-icon bi bi-circle-half"></i>
+                            Auto<i class="bi bi-check2 ms-auto d-none"></i>
+                        </button>
+                    </li>
+                </ul>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm sidebar-toggle"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#sidebar"
+                    aria-expanded="true"
+                    aria-controls="sidebar"
+                    aria-label="Toggle metadata sidebar"
+                    title="Toggle metadata sidebar">
+            <i class="bi bi-arrow-bar-left sidebar-shown"></i>
+            <i class="bi bi-arrow-bar-right sidebar-collapsed"></i>
+            </button>
+        </div>
+        <nav class="navbar bg-light-subtle px-1 fixed-top d-print-none d-md-none">
+            <a class="nav-link ps-1"
+               href="/doc/draft-thomson-hybi-http-timeout/">
+                 
+                    draft-thomson-hybi-http-timeout-03
+                
+                <br class="d-sm-none">
+
+                <span class="ms-sm-3 badge rounded-pill badge-draft">
+                    
+                        None
+                    
+                </span>
+            </a>
+            <button class="navbar-toggler p-1"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#docinfo-collapse"
+                    aria-controls="docinfo-collapse"
+                    aria-expanded="false"
+                    aria-label="Show document information">
+                <span class="navbar-toggler-icon small"></span>
+            </button>
+            <div class="navbar-nav navbar-nav-scroll overscroll-none collapse pt-1" id="docinfo-collapse">
+                <div class="bg-light-subtle p-0">
+                    <table class="table table-sm table-borderless small">
+                        <tbody class="meta align-top">
+                            <tr>
+                                <th scope="row"></th>
+                                <th scope="row">Title</th>
+                                <td class="edit"></td>
+                                <td>Hypertext Transfer Protocol (HTTP) Keep-Alive Header</td>
+                            </tr>
+                        </tbody>
+                        
+
+
+
+
+
+
+
+<tbody class="meta align-top ">
+    <tr>
+        <th scope="row">Document</th>
+        <th scope="row">Document type</th>
+        <td class="edit"></td>
+        <td>
+            
+
+
+
+
+
+
+
+    <span class="text-danger">Expired Internet-Draft</span>
+    (individual)
+    
+
+            
+            
+                <div class="badge rounded-pill text-bg-warning">
+                    Expired &amp; archived
+                </div>
+            
+            
+                
+
+
+
+
+    <div class="alert alert-warning small p-2 mt-2" role="alert">
+        This document is an Internet-Draft (I-D).
+        Anyone may submit an I-D to the IETF.
+        This I-D is <strong>not endorsed by the IETF</strong> and has <strong>no formal standing</strong> in the
+        <a href="/doc/rfc2026/">IETF standards process</a>.
+    </div>
+
+
+            
+        </td>
+    </tr>
+    
+        <tr>
+            <td></td>
+            <th scope="row">Select version</th>
+            <td class="edit"></td>
+            <td>
+                
+
+
+
+    <ul class="revision-list pagination pagination-sm text-center flex-wrap my-0">
+        
+            
+                 
+                    <li class="page-item ">
+                        <a class="page-link"
+                        href="/doc/html/draft-thomson-hybi-http-timeout-00"
+                        >
+                            00
+                        </a>
+                    </li>
+                
+            
+                 
+                    <li class="page-item ">
+                        <a class="page-link"
+                        href="/doc/html/draft-thomson-hybi-http-timeout-01"
+                        rel="nofollow">
+                            01
+                        </a>
+                    </li>
+                
+            
+                 
+                    <li class="page-item ">
+                        <a class="page-link"
+                        href="/doc/html/draft-thomson-hybi-http-timeout-02"
+                        rel="nofollow">
+                            02
+                        </a>
+                    </li>
+                
+            
+                 
+                    <li class="page-item active">
+                        <a class="page-link"
+                        href="/doc/html/draft-thomson-hybi-http-timeout-03"
+                        >
+                            03
+                        </a>
+                    </li>
+                
+            
+            
+        
+    </ul>
+
+            </td>
+        </tr>
+        
+            <tr>
+                <td></td>
+                <th scope="row">Compare versions</th>
+                <td class="edit"></td>
+                <td>
+                    
+
+
+
+<form class="form-horizontal diff-form"
+      action="https://author-tools.ietf.org/iddiff"
+      method="get"
+      target="_blank">
+
+            <select class="form-select form-select-sm mb-1 select2-field"
+                    data-max-entries="1"
+                    data-width="resolve"
+                    data-allow-clear="false"
+                    data-minimum-input-length="0"
+                    aria-label="From revision"
+                    name="url1">
+                
+                    <option value="draft-thomson-hybi-http-timeout-03">
+                        draft-thomson-hybi-http-timeout-03
+                        
+                    </option>
+                
+                    <option value="draft-thomson-hybi-http-timeout-02" selected>
+                        draft-thomson-hybi-http-timeout-02
+                        
+                    </option>
+                
+                    <option value="draft-thomson-hybi-http-timeout-01">
+                        draft-thomson-hybi-http-timeout-01
+                        
+                    </option>
+                
+                    <option value="draft-thomson-hybi-http-timeout-00">
+                        draft-thomson-hybi-http-timeout-00
+                        
+                    </option>
+                
+                
+            </select>
+
+            <select class="form-select form-select-sm mb-1 select2-field"
+                    data-max-entries="1"
+                    data-width="resolve"
+                    data-allow-clear="false"
+                    data-minimum-input-length="0"
+                    aria-label="To revision"
+                    name="url2">
+                
+                    <option value="draft-thomson-hybi-http-timeout-03" selected>
+                        draft-thomson-hybi-http-timeout-03
+                        
+                    </option>
+                
+                    <option value="draft-thomson-hybi-http-timeout-02">
+                        draft-thomson-hybi-http-timeout-02
+                        
+                    </option>
+                
+                    <option value="draft-thomson-hybi-http-timeout-01">
+                        draft-thomson-hybi-http-timeout-01
+                        
+                    </option>
+                
+                    <option value="draft-thomson-hybi-http-timeout-00">
+                        draft-thomson-hybi-http-timeout-00
+                        
+                    </option>
+                
+                
+            </select>
+
+            <button type="submit"
+                    class="btn btn-primary btn-sm"
+                    value="--html"
+                    name="difftype">
+                Side-by-side
+            </button>
+            
+            <button type="submit"
+                    class="btn btn-primary btn-sm"
+                    value="--hwdiff"
+                    name="difftype">
+                Inline
+            </button>
+
+</form>
+                </td>
+            </tr>
+        
+    
+    <tr>
+        <td></td>
+        <th scope="row">Authors</th>
+        <td class="edit">
+            
+        </td>
+        <td>
+            
+            
+                <span ><a 
+           title="Datatracker profile of Martin Thomson"
+            href="/person/mt@lowentropy.net" >Martin Thomson</a> <a 
+               href="mailto:mt%40lowentropy.net"
+               aria-label="Compose email to mt@lowentropy.net"
+               title="Compose email to mt@lowentropy.net">
+                <i class="bi bi-envelope"></i></a></span>,
+            
+                <span ><a 
+           title="Datatracker profile of Salvatore Loreto"
+            href="/person/Salvatore.Loreto@ericsson.com" >Salvatore Loreto</a> <a 
+               href="mailto:Salvatore.Loreto%40ericsson.com"
+               aria-label="Compose email to Salvatore.Loreto@ericsson.com"
+               title="Compose email to Salvatore.Loreto@ericsson.com">
+                <i class="bi bi-envelope"></i></a></span>,
+            
+                <span ><a 
+           title="Datatracker profile of Greg Wilkins"
+            href="/person/gregw@webtide.com" >Greg Wilkins</a> <a 
+               href="mailto:gregw%40webtide.com"
+               aria-label="Compose email to gregw@webtide.com"
+               title="Compose email to gregw@webtide.com">
+                <i class="bi bi-envelope"></i></a></span>
+            
+            
+                <br>
+                <a class="btn btn-primary btn-sm mt-1" href="mailto:draft-thomson-hybi-http-timeout@ietf.org?subject=draft-thomson-hybi-http-timeout" title="Send email to the document authors">Email authors</a>
+            
+        </td>
+    </tr>
+    
+    
+        
+        
+        
+    
+    <tr>
+        <td></td>
+        <th scope="row">
+            RFC stream
+        </th>
+        <td class="edit">
+            
+        </td>
+        <td class="text-body-secondary">
+            
+                (None)
+            
+        </td>
+    </tr>
+    
+        <tr>
+            <td></td>
+            <th scope="row">
+                Intended RFC status
+            </th>
+            <td class="edit">
+                
+            </td>
+            <td>
+                
+                    <span class="text-body-secondary">
+                        (None)
+                    </span>
+                
+            </td>
+        </tr>
+    
+    <tr>
+        <td></td>
+        <th scope="row">
+            Other formats
+        </th>
+        <td class="edit">
+        </td>
+        <td>
+            
+                
+    <div class="buttonlist">
+    
+        
+        <a class="btn btn-primary btn-sm"
+          
+          target="_blank"
+          href="https://www.ietf.org/archive/id/draft-thomson-hybi-http-timeout-03.txt">
+            
+                <i class="bi bi-file-text"></i> txt
+            
+        </a>
+        
+    
+        
+        <a class="btn btn-primary btn-sm"
+          
+          target="_blank"
+          href="https://www.ietf.org/archive/id/draft-thomson-hybi-http-timeout-03.xml">
+            
+                <i class="bi bi-file-code"></i> xml
+            
+        </a>
+        
+    
+        
+    
+        
+        <a class="btn btn-primary btn-sm"
+          
+          target="_blank"
+          href="/doc/draft-thomson-hybi-http-timeout/03/bibtex/">
+            
+                <i class="bi bi-file-ruled"></i> bibtex
+            
+        </a>
+        
+    
+        
+        <a class="btn btn-primary btn-sm"
+          
+          target="_blank"
+          href="/doc/bibxml3/draft-thomson-hybi-http-timeout-03.xml">
+            
+                <i class="bi bi-file-code"></i> bibxml
+            
+        </a>
+        
+    
+</div>
+
+            
+        </td>
+    </tr>
+    
+    
+        
+    
+</tbody>
+                        <tr>
+                            <th scope="row"></th>
+                            <th scope="row"></th>
+                            <td class="edit"></td>
+                            <td>
+                                <a class="btn btn-sm btn-warning mb-3"
+                                target="_blank"
+                                href="https://github.com/ietf-tools/datatracker/issues/new/choose">
+                                    Report a bug
+                                    <i class="bi bi-bug"></i>
+                                </a>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </nav>
+        <div class="row g-0">
+            <div class="col-md-9 d-flex justify-content-center lh-sm"
+                 data-bs-spy="scroll"
+                 data-bs-target="#toc-nav"
+                 data-bs-smooth-scroll="true"
+                 tabindex="0"
+                 id="content">
+                
+                    <div class="rfcmarkup">
+                        <br class="noprint">
+                        <!-- [html-validate-disable-block attr-quotes, void-style, element-permitted-content, heading-level -- FIXME: rfcmarkup/rfc2html generates HTML with issues] -->
+                        <div class="rfcmarkup"><pre>HYBI                                                          M. Thomson
+Internet-Draft                                                 Microsoft
+Intended status: Standards Track                               S. Loreto
+Expires: January 18, 2013                                       Ericsson
+                                                              G. Wilkins
+                                                                 Intalio
+                                                           July 17, 2012
+
+
+          <h1>Hypertext Transfer Protocol (HTTP) Keep-Alive Header</h1>
+                   <h1>draft-thomson-hybi-http-timeout-03</h1>
+
+Abstract
+
+   A Keep-Alive header is defined for HTTP.  This hop-by-hop header
+   informs hosts about connection management policies.  A parameters is
+   defined for idle connection timeout.
+
+Status of this Memo
+
+   This Internet-Draft is submitted in full conformance with the
+   provisions of <a href="/doc/html/bcp78">BCP 78</a> and <a href="/doc/html/bcp79">BCP 79</a>.
+
+   Internet-Drafts are working documents of the Internet Engineering
+   Task Force (IETF).  Note that other groups may also distribute
+   working documents as Internet-Drafts.  The list of current Internet-
+   Drafts is at <a href="https://datatracker.ietf.org/drafts/current/">http://datatracker.ietf.org/drafts/current/</a>.
+
+   Internet-Drafts are draft documents valid for a maximum of six months
+   and may be updated, replaced, or obsoleted by other documents at any
+   time.  It is inappropriate to use Internet-Drafts as reference
+   material or to cite them other than as &quot;work in progress.&quot;
+
+   This Internet-Draft will expire on January 18, 2013.
+
+Copyright Notice
+
+   Copyright (c) 2012 IETF Trust and the persons identified as the
+   document authors.  All rights reserved.
+
+   This document is subject to <a href="/doc/html/bcp78">BCP 78</a> and the IETF Trust&#x27;s Legal
+   Provisions Relating to IETF Documents
+   (<a href="http://trustee.ietf.org/license-info">http://trustee.ietf.org/license-info</a>) in effect on the date of
+   publication of this document.  Please review these documents
+   carefully, as they describe your rights and restrictions with respect
+   to this document.  Code Components extracted from this document must
+   include Simplified BSD License text as described in Section 4.e of
+   the Trust Legal Provisions and are provided without warranty as
+
+
+
+<span class="grey">Thomson, et al.         Expires January 18, 2013                [Page 1]</span></pre>
+<pre class="newpage"><hr class="noprint" id="page-2"><span class="grey">Internet-Draft               HTTP Keep-Alive                   July 2012</span>
+
+
+   described in the Simplified BSD License.
+
+
+Table of Contents
+
+   <a href="#section-1">1</a>.  Introduction . . . . . . . . . . . . . . . . . . . . . . . . .  <a href="#page-3">3</a>
+     <a href="#section-1.1">1.1</a>.  Idle Connection Timeouts and Connection Reuse  . . . . . .  <a href="#page-3">3</a>
+     <a href="#section-1.2">1.2</a>.  Terminology  . . . . . . . . . . . . . . . . . . . . . . .  <a href="#page-3">3</a>
+   <a href="#section-2">2</a>.  Keep-Alive Header  . . . . . . . . . . . . . . . . . . . . . .  <a href="#page-4">4</a>
+     <a href="#section-2.1">2.1</a>.  &#x27;timeout&#x27; Parameter  . . . . . . . . . . . . . . . . . . .  <a href="#page-4">4</a>
+     <a href="#section-2.2">2.2</a>.  Other Header Parameters  . . . . . . . . . . . . . . . . .  <a href="#page-5">5</a>
+       <a href="#section-2.2.1">2.2.1</a>.  &#x27;max&#x27; Parameter  . . . . . . . . . . . . . . . . . . .  <a href="#page-5">5</a>
+   <a href="#section-3">3</a>.  Existing Intermediaries  . . . . . . . . . . . . . . . . . . .  <a href="#page-5">5</a>
+   <a href="#section-4">4</a>.  Upgraded HTTP Connections  . . . . . . . . . . . . . . . . . .  <a href="#page-6">6</a>
+   <a href="#section-5">5</a>.  Examples . . . . . . . . . . . . . . . . . . . . . . . . . . .  <a href="#page-6">6</a>
+   <a href="#section-6">6</a>.  Security Considerations  . . . . . . . . . . . . . . . . . . .  <a href="#page-7">7</a>
+   <a href="#section-7">7</a>.  IANA Considerations  . . . . . . . . . . . . . . . . . . . . .  <a href="#page-8">8</a>
+     <a href="#section-7.1">7.1</a>.  Registration for Keep-Alive Header . . . . . . . . . . . .  <a href="#page-8">8</a>
+     <a href="#section-7.2">7.2</a>.  Registry for Keep-Alive Information  . . . . . . . . . . .  <a href="#page-8">8</a>
+   <a href="#section-8">8</a>.  Acknowledgments  . . . . . . . . . . . . . . . . . . . . . . .  <a href="#page-9">9</a>
+   <a href="#section-9">9</a>.  Change Log . . . . . . . . . . . . . . . . . . . . . . . . . .  <a href="#page-9">9</a>
+   <a href="#section-10">10</a>. References . . . . . . . . . . . . . . . . . . . . . . . . . .  <a href="#page-9">9</a>
+     <a href="#section-10.1">10.1</a>. Normative References . . . . . . . . . . . . . . . . . . .  <a href="#page-9">9</a>
+     <a href="#section-10.2">10.2</a>. Informative References . . . . . . . . . . . . . . . . . . <a href="#page-10">10</a>
+   Authors&#x27; Addresses . . . . . . . . . . . . . . . . . . . . . . . . <a href="#page-10">10</a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<span class="grey">Thomson, et al.         Expires January 18, 2013                [Page 2]</span></pre>
+<pre class="newpage"><hr class="noprint" id="page-3"><span class="grey">Internet-Draft               HTTP Keep-Alive                   July 2012</span>
+
+
+<h2><a class="selflink" id="section-1" href="#section-1">1</a>.  Introduction</h2>
+
+   This document describes the &quot;Keep-Alive&quot; header.  The &quot;Keep-Alive&quot;
+   header provides Hypertext Transfer Protocol (HTTP)
+   [<a href="#ref-I-D.ietf-httpbis-p1-messaging">I-D.ietf-httpbis-p1-messaging</a>] clients, servers and intermediaries
+   with information about the connection use policies of their peers.
+
+   The &quot;timeout&quot; Keep-Alive parameter indicates the time that a
+   connection will be allowed to remain idle before it is closed.
+
+   Some HTTP implementations already provide an implementation for this
+   header.  Not all of those implementations are interoperable due to
+   significant differences in the header format.  This draft defines a
+   single format for the header and ascribes specific semantics to the
+   header parameters.
+
+<h3><a class="selflink" id="section-1.1" href="#section-1.1">1.1</a>.  Idle Connection Timeouts and Connection Reuse</h3>
+
+   Management of idle HTTP connections has an impact on long-lived
+   communications between hosts.  Hosts are able to close idle
+   connections in order to reduce resource consumption.
+
+   Many clients choose not to send non-idempotent requests on idle
+   connections.  If the intermediary or server holding the other end of
+   the connection chooses to close the connection while a non-idempotent
+   request is in transit, the client has no way to tell if the request
+   has succeeded.  For this reason, many clients establish a new
+   connection for every non-idempotent request.  This is inefficient if
+   the existing connection is a usable connection: establishing a new
+   connection adds significantly to the latency of the request.
+
+   Connection resources can be more efficiently used when an idle
+   connection timeout is known.  A client that only periodically sends
+   request can learn about the possibility of a connection timeout and
+   can act to create a new connection for requests or send requests that
+   keep the connection from timing out.  Alternatively, a client that
+   knows that more requests on a connection are unlikely within the
+   discovered timeout interval can close the connection immediately
+   after a poll, releasing resources.
+
+<h3><a class="selflink" id="section-1.2" href="#section-1.2">1.2</a>.  Terminology</h3>
+
+   In this document, the key words &quot;MUST&quot;, &quot;MUST NOT&quot;, &quot;REQUIRED&quot;,
+   &quot;SHALL&quot;, &quot;SHALL NOT&quot;, &quot;SHOULD&quot;, &quot;SHOULD NOT&quot;, &quot;RECOMMENDED&quot;, &quot;NOT
+   RECOMMENDED&quot;, &quot;MAY&quot;, and &quot;OPTIONAL&quot; are to be interpreted as
+   described in <a href="/doc/html/bcp14">BCP 14</a>, <a href="/doc/html/rfc2119">RFC 2119</a> [<a href="/doc/html/rfc2119" title="S.">RFC2119</a>] and indicate requirement
+   levels for compliant implementations.
+
+
+
+
+<span class="grey">Thomson, et al.         Expires January 18, 2013                [Page 3]</span></pre>
+<pre class="newpage"><hr class="noprint" id="page-4"><span class="grey">Internet-Draft               HTTP Keep-Alive                   July 2012</span>
+
+
+<h2><a class="selflink" id="section-2" href="#section-2">2</a>.  Keep-Alive Header</h2>
+
+   The &quot;Keep-Alive&quot; header is a hop-by-hop header that provides
+   information about a persistent connection.  Both client and server
+   are able to provide information independently.
+
+   Keep-Alive           = &quot;Keep-Alive&quot; &quot;:&quot; 1#keep-alive-info
+   keep-alive-info      =   &quot;timeout&quot; &quot;=&quot; delta-seconds
+                          / keep-alive-extension
+   keep-alive-extension = token [ &quot;=&quot; ( token / quoted-string ) ]
+
+   This header is sent by either host participating in a persistent
+   connection.  The values might be set based on policy implemented by
+   servers, clients and intermediaries.  Values might also be set based
+   on knowledge that a host has about lower layer intermediaries in the
+   path of the request, such as a TCP middlebox.  Such middleboxes, in
+   particular network address translators (NATs), frequently discard
+   mappings for idle connections, causing the connection to fail after a
+   certain duration of inactivity.
+
+   The value of Keep-Alive parameters can change on each request or
+   response sent on a connection.  Absence of the header or any
+   parameter implies that any previously provided value still applies.
+
+   As a hop-by-hop header, this header only applies to a single
+   transport-level connection.  If a Keep-Alive header is added to a
+   request or response, the Connection header MUST include the tag
+   &quot;Keep-Alive&quot;.  This ensures that compliant intermediaries that do not
+   recognize this header remove it before forwarding a request.
+
+<h3><a class="selflink" id="section-2.1" href="#section-2.1">2.1</a>.  &#x27;timeout&#x27; Parameter</h3>
+
+   A host sets the value of the &quot;timeout&quot; parameter to the time that the
+   host will allow an idle connection to remain open before it is
+   closed.  A connection is idle if no data is sent or received by a
+   host.
+
+   The value of the &quot;timeout&quot; parameter is a single integer in seconds.
+
+   A host MAY keep an idle connection open for longer than the time that
+   it indicates, but it SHOULD attempt to retain a connection for at
+   least as long as indicated.
+
+   Each peer, client or server, has a different view of the time that a
+   connection becomes idle.  Packet transmission at one peer necessarily
+   occurs before receipt, meaning that the sending peer perceives the
+   connection as being idle earlier to the receiving peer.  Similarly,
+   the buffering or retransmission of data by lower layers of the stack,
+
+
+
+<span class="grey">Thomson, et al.         Expires January 18, 2013                [Page 4]</span></pre>
+<pre class="newpage"><hr class="noprint" id="page-5"><span class="grey">Internet-Draft               HTTP Keep-Alive                   July 2012</span>
+
+
+   which is unlikely to be visible to the HTTP implementation, compounds
+   this effect.  Clients are advised to make allowances for delays in
+   determining whether to reuse an idle connection.
+
+<h3><a class="selflink" id="section-2.2" href="#section-2.2">2.2</a>.  Other Header Parameters</h3>
+
+   The Keep-Alive header can be extended by adding any number of keep-
+   alive-extension values to the header.  Any extension that is not
+   understood MUST be ignored.
+
+   The HTTP Keep-Alive Information Registry defines the namespace for
+   Keep-Alive extensions.  <a href="#section-7.2">Section 7.2</a> describes this registry.
+
+<h4><a class="selflink" id="section-2.2.1" href="#section-2.2.1">2.2.1</a>.  &#x27;max&#x27; Parameter</h4>
+
+   The &quot;max&quot; parameter has been used to indicate the maximum number of
+   requests that would be made on the connection.  This parameter is
+   deprecated.  Any limit on requests can be enforced by sending
+   &quot;Connection: close&quot; and closing the connection.
+
+
+<h2><a class="selflink" id="section-3" href="#section-3">3</a>.  Existing Intermediaries</h2>
+
+   The exact impact of an intermediary on an HTTP request with a Keep-
+   Alive header depends on the type of intermediary.
+
+   An intermediary that is compliant with HTTP/1.1, but does not
+   implement Keep-Alive, ignores and discards this header before
+   forwarding a request.  Since it is unaware of the semantics of the
+   header it could drop an idle connection at any time (see <a href="#section-7.1.4">Section</a>
+   <a href="#section-7.1.4">7.1.4</a> of [<a href="#ref-I-D.ietf-httpbis-p1-messaging">I-D.ietf-httpbis-p1-messaging</a>]).
+
+   A non-compliant &quot;transparent&quot; intermediary could pass this header on
+   to the next hop.  This results in errors of the sort that are
+   described in Section A.1.2 of [<a href="#ref-I-D.ietf-httpbis-p1-messaging">I-D.ietf-httpbis-p1-messaging</a>].
+   Clients that send this header to HTTP/1.0 servers or proxies SHOULD
+   monitor for &quot;hung&quot; connections and avoid sending the header if a
+   connection appears to hang.
+
+   A network address translation (NAT) device or other middlebox might
+   cause a connection to become unavailable prior to the advertised
+   timeout.
+
+   A client or intermediary can revise or remove the Keep-Alive header
+   for subsequent requests to the same resource or origin server if it
+   detects non-compliant intermediaries or middleboxes that have shorter
+   timeout periods.
+
+
+
+
+<span class="grey">Thomson, et al.         Expires January 18, 2013                [Page 5]</span></pre>
+<pre class="newpage"><hr class="noprint" id="page-6"><span class="grey">Internet-Draft               HTTP Keep-Alive                   July 2012</span>
+
+
+<h2><a class="selflink" id="section-4" href="#section-4">4</a>.  Upgraded HTTP Connections</h2>
+
+   A connection timeout can apply to a connection that is subsequently
+   upgraded to another protocol [<a href="/doc/html/rfc2817" title="&quot;Upgrading to TLS Within HTTP/1.1&quot;">RFC2817</a>], such as the websocket
+   protocol [<a href="/doc/html/rfc6455" title="&quot;The WebSocket Protocol&quot;">RFC6455</a>].
+
+   The idle connection timeout applies to the upgraded connection,
+   unless the upgraded protocol provides another method for indicating
+   idle timeouts.
+
+   A server, client or intermediary might apply different policies to an
+   upgraded protocol.
+
+   Upgraded protocols might establish an end-to-end connection.  As a
+   hop-by-hop header, the values in the &quot;Keep-Alive&quot; on each hop apply
+   to every hop equally.  For &quot;timeout&quot;, this means that the lowest
+   value from any hop applies to the connection.
+
+   Intermediaries that support this header SHOULD determine the impact
+   of a header parameter on dependent hops and reflect that in the
+   values they set.  For &quot;timeout&quot;, this means that the lowest value
+   from the values seen and the local value is provided in outgoing
+   messages.
+
+
+<h2><a class="selflink" id="section-5" href="#section-5">5</a>.  Examples</h2>
+
+   The example in Figure 1 shows how a Keep-Alive header could be used.
+   All connections are independently negotiated.  In this example, the
+   client indicates a timeout of 600 seconds (10 minutes), but the proxy
+   is prepared to retain the connection for up to 3600 seconds (1 hour).
+   On the link between proxy and server, the proxy requests a timeout of
+   1200 seconds and the server indicates a lower limit of 300 seconds.
+
+    Client                        Proxy                         Server
+      |                             |                              |
+      +- Keep-Alive: timeout=600 --&gt;|                              |
+      |  Connection: Keep-Alive     |                              |
+      |                             +- Keep-Alive: timeout=1200 --&gt;|
+      |                             |  Connection: Keep-Alive      |
+      |                             |                              |
+      |                             |&lt;-- Keep-Alive: timeout=300 --+
+      |                             |    Connection: Keep-Alive    |
+      |&lt;- Keep-Alive: timeout=3600 -+                              |
+      |    Connection: Keep-Alive   |                              |
+      |                             |                              |
+
+                      Figure 1: Independent HTTP Hops
+
+
+
+<span class="grey">Thomson, et al.         Expires January 18, 2013                [Page 6]</span></pre>
+<pre class="newpage"><hr class="noprint" id="page-7"><span class="grey">Internet-Draft               HTTP Keep-Alive                   July 2012</span>
+
+
+   As this example shows, the timeout policies maintained by the proxy
+   are different for each connection.  Each connection hop is
+   independent.
+
+   The example in Figure 2 shows the headers included in an upgrade from
+   HTTP/1.1 to WebSocket [<a href="/doc/html/rfc6455" title="&quot;The WebSocket Protocol&quot;">RFC6455</a>].  With a websocket upgrade, the
+   connections on each hop cannot have independent lifecycles on either
+   side of an intermediary.  After the upgrade, timeout policies cannot
+   be independent for each hop.  The proxy adjusts the timeout value to
+   reflect the lower of the values set by client and the proxy policies
+   so that the server is aware of the connection characteristics;
+   similarly, the value from the server is provided to the client.
+
+    Client                        Proxy                         Server
+      |                             |                              |
+      |  Upgrade: websocket         |                              |
+      +- Keep-Alive: timeout=600 --&gt;|                              |
+      |  Connection: Keep-Alive,    |                              |
+      |              Upgrade        |                              |
+      |                             |  Upgrade: websocket          |
+      |                             +- Keep-Alive: timeout=600 ---&gt;|
+      |                             |  Connection: Keep-Alive,     |
+      |                             |              Upgrade         |
+      |                             |                              |
+      |                             |    Upgrade: websocket        |
+      |                             |&lt;-- Keep-Alive: timeout=300 --+
+      |                             |    Connection: Keep-Alive,   |
+      |                             |                Upgrade       |
+      |   Upgrade: websocket        |                              |
+      |&lt;- Keep-Alive: timeout=300 --+                              |
+      |   Connection: Keep-Alive,   |                              |
+      |               Upgrade       |                              |
+      |                             |                              |
+
+             Figure 2: Interdependent Connections with Upgrade
+
+
+<h2><a class="selflink" id="section-6" href="#section-6">6</a>.  Security Considerations</h2>
+
+   Establishing a persistent connection requires a commitment of
+   resources at a host.  The Keep-Alive header are used to express host
+   policy that could alter the way that a host allocates connection
+   resources.  Since these policies can be enacted without this
+   feedback, these indications have little effect on security other than
+   exposing specifics of policy.
+
+   A host can close a non-idle connection sooner than the indicated time
+   if necessary or as dictated by local policy (see <a href="#section-7.1.4">Section 7.1.4</a> of
+
+
+
+<span class="grey">Thomson, et al.         Expires January 18, 2013                [Page 7]</span></pre>
+<pre class="newpage"><hr class="noprint" id="page-8"><span class="grey">Internet-Draft               HTTP Keep-Alive                   July 2012</span>
+
+
+   [<a href="#ref-I-D.ietf-httpbis-p1-messaging">I-D.ietf-httpbis-p1-messaging</a>]).
+
+
+<h2><a class="selflink" id="section-7" href="#section-7">7</a>.  IANA Considerations</h2>
+
+   [[Note to IANA/RFC Editor: Please replace instance of RFCXXXX with
+   the number of the published RFC and remove this note.]]
+
+<h3><a class="selflink" id="section-7.1" href="#section-7.1">7.1</a>.  Registration for Keep-Alive Header</h3>
+
+   This document registers the HTTP &quot;Keep-Alive&quot; header in the
+   &quot;Permanent Message Header Fields&quot; registry established by [<a href="/doc/html/rfc3864" title="&quot;Registration Procedures for Message Header Fields&quot;">RFC3864</a>]
+
+   Header field:  Keep-Alive
+
+   Applicable protocol:  HTTP
+
+   Status:  standard
+
+   Author/change controller:  Internet Engineering Task Force, IETF
+      (iesg@ietf.org)
+
+   Specification document(s):  RFCXXXX (this document)
+
+<h3><a class="selflink" id="section-7.2" href="#section-7.2">7.2</a>.  Registry for Keep-Alive Information</h3>
+
+   This document establishes a registry for Keep-Alive Information.
+
+   Registrations are subject to Specification Required [<a href="/doc/html/rfc5226" title="">RFC5226</a>].  The
+   designated expert is advised to review registrations and work with
+   the submitter to ensure that:
+
+   o  the registration name conforms to the HTTP &quot;token&quot; grammar
+
+   o  a stable specification exists that is sufficient for interoperable
+      implementation
+
+   o  the registration does not duplicate an existing entry
+
+   The registry includes the following initial values:
+
+   timeout  See <a href="#section-2.1">Section 2.1</a> of this document.
+
+   max  Deprecated.  See <a href="#section-2.2.1">Section 2.2.1</a> of this document.
+
+
+
+
+
+
+
+<span class="grey">Thomson, et al.         Expires January 18, 2013                [Page 8]</span></pre>
+<pre class="newpage"><hr class="noprint" id="page-9"><span class="grey">Internet-Draft               HTTP Keep-Alive                   July 2012</span>
+
+
+<h2><a class="selflink" id="section-8" href="#section-8">8</a>.  Acknowledgments</h2>
+
+   Jamie Lokier provided valuable contributions of experience, insight
+   and text suggestions to this document.  Roy Fielding provided
+   information on existing implementations of the poorly documented
+   header.  Also provided useful feedback: Patrick McManus, Dave Thaler,
+   Konstantinos Pentikousis.
+
+
+<h2><a class="selflink" id="section-9" href="#section-9">9</a>.  Change Log</h2>
+
+   Since -01:
+
+   o  Deprecated &#x27;max&#x27;
+
+   o  Corrected badly misleading examples
+
+   o  Loosened the registry policy from IETF Review
+
+   Since -00:
+
+   o  Removed Request-Timeout in favor of the wait parameter of the
+      Prefer header.
+
+   o  Connection-Timeout has now been replaced with the zombie spawn of
+      Keep-Alive.  This means that it picks up the &#x27;max&#x27; parameter as
+      baggage.  Open question: should &#x27;max&#x27; be deprecated?
+
+   Since <a href="/doc/html/draft-loreto-http-timeout">draft-loreto-http-timeout</a>:
+
+   o  Changed Timeout to Request-Timeout to avoid a conflict with an
+      existing header definition.
+
+   o  Added note about the application of Connection-Timeout to upgraded
+      protocols.
+
+
+<h2><a class="selflink" id="section-10" href="#section-10">10</a>.  References</h2>
+
+<h3><a class="selflink" id="section-10.1" href="#section-10.1">10.1</a>.  Normative References</h3>
+
+   [<a id="ref-I-D.ietf-httpbis-p1-messaging">I-D.ietf-httpbis-p1-messaging</a>]
+              Fielding, R., Lafon, Y., and J. Reschke, &quot;HTTP/1.1, part
+              1: Message Routing and Syntax&quot;&quot;,
+              <a href="/doc/html/draft-ietf-httpbis-p1-messaging-20">draft-ietf-httpbis-p1-messaging-20</a> (work in progress),
+              July 2012.
+
+   [<a id="ref-RFC2119">RFC2119</a>]  Bradner, S., &quot;Key words for use in RFCs to Indicate
+
+
+
+<span class="grey">Thomson, et al.         Expires January 18, 2013                [Page 9]</span></pre>
+<pre class="newpage"><hr class="noprint" id="page-10"><span class="grey">Internet-Draft               HTTP Keep-Alive                   July 2012</span>
+
+
+              Requirement Levels&quot;, <a href="/doc/html/bcp14">BCP 14</a>, <a href="/doc/html/rfc2119">RFC 2119</a>, March 1997.
+
+   [<a id="ref-RFC3864">RFC3864</a>]  Klyne, G., Nottingham, M., and J. Mogul, &quot;Registration
+              Procedures for Message Header Fields&quot;, <a href="/doc/html/bcp90">BCP 90</a>, <a href="/doc/html/rfc3864">RFC 3864</a>,
+              September 2004.
+
+   [<a id="ref-RFC5226">RFC5226</a>]  Narten, T. and H. Alvestrand, &quot;Guidelines for Writing an
+              IANA Considerations Section in RFCs&quot;, <a href="/doc/html/bcp26">BCP 26</a>, <a href="/doc/html/rfc5226">RFC 5226</a>,
+              May 2008.
+
+<h3><a class="selflink" id="section-10.2" href="#section-10.2">10.2</a>.  Informative References</h3>
+
+   [<a id="ref-RFC2068">RFC2068</a>]  Fielding, R., Gettys, J., Mogul, J., Nielsen, H., and T.
+              Berners-Lee, &quot;Hypertext Transfer Protocol -- HTTP/1.1&quot;,
+              <a href="/doc/html/rfc2068">RFC 2068</a>, January 1997.
+
+   [<a id="ref-RFC2817">RFC2817</a>]  Khare, R. and S. Lawrence, &quot;Upgrading to TLS Within
+              HTTP/1.1&quot;, <a href="/doc/html/rfc2817">RFC 2817</a>, May 2000.
+
+   [<a id="ref-RFC6455">RFC6455</a>]  Fette, I. and A. Melnikov, &quot;The WebSocket Protocol&quot;,
+              <a href="/doc/html/rfc6455">RFC 6455</a>, December 2011.
+
+
+Authors&#x27; Addresses
+
+   Martin Thomson
+   Microsoft
+   3210 Porter Drive
+   Palo Alto, CA  94304
+   US
+
+   Phone: +1 650-353-1925
+   Email: martin.thomson@skype.net
+
+
+   Salvatore Loreto
+   Ericsson
+   Hirsalantie 11
+   Jorvas  02420
+   Finland
+
+   Email: salvatore.loreto@ericsson.com
+
+
+
+
+
+
+
+
+
+<span class="grey">Thomson, et al.         Expires January 18, 2013               [Page 10]</span></pre>
+<pre class="newpage"><hr class="noprint" id="page-11"><span class="grey">Internet-Draft               HTTP Keep-Alive                   July 2012</span>
+
+
+   Greg Wilkins
+   Intalio
+   644 Emerson Street, Suite 200
+   Palo Alto  94301
+   USA
+
+   Email: gregw@intalio.com
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Thomson, et al.         Expires January 18, 2013               [Page 11]
+</pre></div>
+                    </div>
+                
+            </div>
+            <div class="d-print-none col-md-3 bg-light-subtle collapse show" id="sidebar">
+                <div class="position-fixed border-start sidebar overflow-scroll overscroll-none no-scrollbar">
+                    <div class="d-flex flex-column vh-100 pt-2 pt-lg-3 ps-3 pl-md-2 pl-lg-3">
+                        <div>
+                            <a class="btn btn-primary btn-sm" href="/doc/draft-thomson-hybi-http-timeout/">Datatracker</a>
+                            <p class="fw-bold pt-2">
+                                
+                                    draft-thomson-hybi-http-timeout-03
+                                
+                                <br>
+                                
+
+
+
+
+
+
+
+    <span class="text-danger">Expired Internet-Draft</span>
+    (individual)
+    
+
+                            </p>
+                        </div>
+                        
+                        <ul class="nav nav-tabs nav-fill small me-2" role="tablist">
+                            <li class="nav-item" role="presentation" title="Document information">
+                                <button class="nav-link px-2"
+                                        id="docinfo-tab"
+                                        data-bs-toggle="tab"
+                                        data-bs-target="#docinfo-tab-pane"
+                                        type="button"
+                                        role="tab"
+                                        aria-controls="docinfo-tab-pane"
+                                        aria-selected="true">
+                                    <i class="bi bi-info-circle"></i><span class="d-none d-md-block d-xl-inline ms-xl-1">Info</span>
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation" title="Table of contents">
+                                <button class="nav-link px-2"
+                                        id="toc-tab"
+                                        data-bs-toggle="tab"
+                                        data-bs-target="#toc-tab-pane"
+                                        type="button"
+                                        role="tab"
+                                        aria-controls="toc-tab-pane"
+                                        aria-selected="false">
+                                    <i class="bi bi-list-ol"></i><span class="d-none d-md-block d-xl-inline ms-xl-1">Contents</span>
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation" title="Preferences">
+                                <button class="nav-link px-2"
+                                        id="pref-tab"
+                                        data-bs-toggle="tab"
+                                        data-bs-target="#pref-tab-pane"
+                                        type="button"
+                                        role="tab"
+                                        aria-controls="pref-tab-pane"
+                                        aria-selected="false">
+                                    <i class="bi bi-gear"></i><span class="d-none d-md-block d-xl-inline ms-xl-1">Prefs</span>
+                                </button>
+                            </li>
+                        </ul>
+                        <div class="overflow-auto tab-content pt-2 me-2">
+                            <div class="tab-pane"
+                                 id="docinfo-tab-pane"
+                                 role="tabpanel"
+                                 aria-labelledby="docinfo-tab"
+                                 tabindex="0">
+                                <table class="table table-sm table-borderless">
+                                    
+
+
+
+
+
+
+
+<tbody class="meta align-top ">
+    <tr>
+        <th scope="row">Document</th>
+        <th scope="row">Document type</th>
+        <td class="edit"></td>
+        <td>
+            
+
+
+
+
+
+
+
+    <span class="text-danger">Expired Internet-Draft</span>
+    (individual)
+    
+
+            
+            
+                <div class="badge rounded-pill text-bg-warning">
+                    Expired &amp; archived
+                </div>
+            
+            
+                
+
+
+
+
+    <div class="alert alert-warning small p-2 mt-2" role="alert">
+        This document is an Internet-Draft (I-D).
+        Anyone may submit an I-D to the IETF.
+        This I-D is <strong>not endorsed by the IETF</strong> and has <strong>no formal standing</strong> in the
+        <a href="/doc/rfc2026/">IETF standards process</a>.
+    </div>
+
+
+            
+        </td>
+    </tr>
+    
+        <tr>
+            <td></td>
+            <th scope="row">Select version</th>
+            <td class="edit"></td>
+            <td>
+                
+
+
+
+    <ul class="revision-list pagination pagination-sm text-center flex-wrap my-0">
+        
+            
+                 
+                    <li class="page-item ">
+                        <a class="page-link"
+                        href="/doc/html/draft-thomson-hybi-http-timeout-00"
+                        >
+                            00
+                        </a>
+                    </li>
+                
+            
+                 
+                    <li class="page-item ">
+                        <a class="page-link"
+                        href="/doc/html/draft-thomson-hybi-http-timeout-01"
+                        rel="nofollow">
+                            01
+                        </a>
+                    </li>
+                
+            
+                 
+                    <li class="page-item ">
+                        <a class="page-link"
+                        href="/doc/html/draft-thomson-hybi-http-timeout-02"
+                        rel="nofollow">
+                            02
+                        </a>
+                    </li>
+                
+            
+                 
+                    <li class="page-item active">
+                        <a class="page-link"
+                        href="/doc/html/draft-thomson-hybi-http-timeout-03"
+                        >
+                            03
+                        </a>
+                    </li>
+                
+            
+            
+        
+    </ul>
+
+            </td>
+        </tr>
+        
+            <tr>
+                <td></td>
+                <th scope="row">Compare versions</th>
+                <td class="edit"></td>
+                <td>
+                    
+
+
+
+<form class="form-horizontal diff-form"
+      action="https://author-tools.ietf.org/iddiff"
+      method="get"
+      target="_blank">
+
+            <select class="form-select form-select-sm mb-1 select2-field"
+                    data-max-entries="1"
+                    data-width="resolve"
+                    data-allow-clear="false"
+                    data-minimum-input-length="0"
+                    aria-label="From revision"
+                    name="url1">
+                
+                    <option value="draft-thomson-hybi-http-timeout-03">
+                        draft-thomson-hybi-http-timeout-03
+                        
+                    </option>
+                
+                    <option value="draft-thomson-hybi-http-timeout-02" selected>
+                        draft-thomson-hybi-http-timeout-02
+                        
+                    </option>
+                
+                    <option value="draft-thomson-hybi-http-timeout-01">
+                        draft-thomson-hybi-http-timeout-01
+                        
+                    </option>
+                
+                    <option value="draft-thomson-hybi-http-timeout-00">
+                        draft-thomson-hybi-http-timeout-00
+                        
+                    </option>
+                
+                
+            </select>
+
+            <select class="form-select form-select-sm mb-1 select2-field"
+                    data-max-entries="1"
+                    data-width="resolve"
+                    data-allow-clear="false"
+                    data-minimum-input-length="0"
+                    aria-label="To revision"
+                    name="url2">
+                
+                    <option value="draft-thomson-hybi-http-timeout-03" selected>
+                        draft-thomson-hybi-http-timeout-03
+                        
+                    </option>
+                
+                    <option value="draft-thomson-hybi-http-timeout-02">
+                        draft-thomson-hybi-http-timeout-02
+                        
+                    </option>
+                
+                    <option value="draft-thomson-hybi-http-timeout-01">
+                        draft-thomson-hybi-http-timeout-01
+                        
+                    </option>
+                
+                    <option value="draft-thomson-hybi-http-timeout-00">
+                        draft-thomson-hybi-http-timeout-00
+                        
+                    </option>
+                
+                
+            </select>
+
+            <button type="submit"
+                    class="btn btn-primary btn-sm"
+                    value="--html"
+                    name="difftype">
+                Side-by-side
+            </button>
+            
+            <button type="submit"
+                    class="btn btn-primary btn-sm"
+                    value="--hwdiff"
+                    name="difftype">
+                Inline
+            </button>
+
+</form>
+                </td>
+            </tr>
+        
+    
+    <tr>
+        <td></td>
+        <th scope="row">Authors</th>
+        <td class="edit">
+            
+        </td>
+        <td>
+            
+            
+                <span ><a 
+           title="Datatracker profile of Martin Thomson"
+            href="/person/mt@lowentropy.net" >Martin Thomson</a> <a 
+               href="mailto:mt%40lowentropy.net"
+               aria-label="Compose email to mt@lowentropy.net"
+               title="Compose email to mt@lowentropy.net">
+                <i class="bi bi-envelope"></i></a></span>,
+            
+                <span ><a 
+           title="Datatracker profile of Salvatore Loreto"
+            href="/person/Salvatore.Loreto@ericsson.com" >Salvatore Loreto</a> <a 
+               href="mailto:Salvatore.Loreto%40ericsson.com"
+               aria-label="Compose email to Salvatore.Loreto@ericsson.com"
+               title="Compose email to Salvatore.Loreto@ericsson.com">
+                <i class="bi bi-envelope"></i></a></span>,
+            
+                <span ><a 
+           title="Datatracker profile of Greg Wilkins"
+            href="/person/gregw@webtide.com" >Greg Wilkins</a> <a 
+               href="mailto:gregw%40webtide.com"
+               aria-label="Compose email to gregw@webtide.com"
+               title="Compose email to gregw@webtide.com">
+                <i class="bi bi-envelope"></i></a></span>
+            
+            
+                <br>
+                <a class="btn btn-primary btn-sm mt-1" href="mailto:draft-thomson-hybi-http-timeout@ietf.org?subject=draft-thomson-hybi-http-timeout" title="Send email to the document authors">Email authors</a>
+            
+        </td>
+    </tr>
+    
+    
+        
+        
+        
+    
+    <tr>
+        <td></td>
+        <th scope="row">
+            RFC stream
+        </th>
+        <td class="edit">
+            
+        </td>
+        <td class="text-body-secondary">
+            
+                (None)
+            
+        </td>
+    </tr>
+    
+        <tr>
+            <td></td>
+            <th scope="row">
+                Intended RFC status
+            </th>
+            <td class="edit">
+                
+            </td>
+            <td>
+                
+                    <span class="text-body-secondary">
+                        (None)
+                    </span>
+                
+            </td>
+        </tr>
+    
+    <tr>
+        <td></td>
+        <th scope="row">
+            Other formats
+        </th>
+        <td class="edit">
+        </td>
+        <td>
+            
+                
+    <div class="buttonlist">
+    
+        
+        <a class="btn btn-primary btn-sm"
+          
+          target="_blank"
+          href="https://www.ietf.org/archive/id/draft-thomson-hybi-http-timeout-03.txt">
+            
+                <i class="bi bi-file-text"></i> txt
+            
+        </a>
+        
+    
+        
+        <a class="btn btn-primary btn-sm"
+          
+          target="_blank"
+          href="https://www.ietf.org/archive/id/draft-thomson-hybi-http-timeout-03.xml">
+            
+                <i class="bi bi-file-code"></i> xml
+            
+        </a>
+        
+    
+        
+    
+        
+        <a class="btn btn-primary btn-sm"
+          
+          target="_blank"
+          href="/doc/draft-thomson-hybi-http-timeout/03/bibtex/">
+            
+                <i class="bi bi-file-ruled"></i> bibtex
+            
+        </a>
+        
+    
+        
+        <a class="btn btn-primary btn-sm"
+          
+          target="_blank"
+          href="/doc/bibxml3/draft-thomson-hybi-http-timeout-03.xml">
+            
+                <i class="bi bi-file-code"></i> bibxml
+            
+        </a>
+        
+    
+</div>
+
+            
+        </td>
+    </tr>
+    
+    
+        
+    
+</tbody>
+                                </table>
+                                <a class="btn btn-sm btn-warning mb-3"
+                                target="_blank"
+                                href="https://github.com/ietf-tools/datatracker/issues/new/choose">
+                                    Report a datatracker bug
+                                    <i class="bi bi-bug"></i>
+                                </a>
+                            </div>
+                            <div class="tab-pane mb-5"
+                                 id="toc-tab-pane"
+                                 role="tabpanel"
+                                 aria-labelledby="toc-tab"
+                                 tabindex="0">
+                                <nav class="nav nav-pills flex-column small" id="toc-nav">
+                                </nav>
+                            </div>
+                            <div class="tab-pane mb-5 small"
+                                 id="pref-tab-pane"
+                                 role="tabpanel"
+                                 aria-labelledby="pref-tab"
+                                 tabindex="0">
+                                <label class="form-label fw-bold mb-2">Show sidebar by default</label>
+                                <div class="btn-group-vertical btn-group-sm d-flex" role="group">
+                                    <input type="radio" class="btn-check" name="sidebar" id="on-radio">
+                                    <label class="btn btn-outline-primary" for="on-radio">Yes</label>
+                                    <input type="radio" class="btn-check" name="sidebar" id="off-radio">
+                                    <label class="btn btn-outline-primary" for="off-radio">No</label>
+                                </div>
+                                <label class="form-label fw-bold mt-4 mb-2">Tab to show by default</label>
+                                <div class="btn-group-vertical btn-group-sm d-flex" role="group">
+                                    <input type="radio" class="btn-check" name="deftab" id="docinfo-radio">
+                                    <label class="btn btn-outline-primary" for="docinfo-radio">
+                                        <i class="bi bi-info-circle me-1"></i>Info
+                                    </label>
+                                    <input type="radio" class="btn-check" name="deftab" id="toc-radio">
+                                    <label class="btn btn-outline-primary" for="toc-radio">
+                                        <i class="bi bi-list-ol me-1"></i>Contents
+                                    </label>
+                                </div>
+                                <label class="form-label fw-bold mt-4 mb-2">HTMLization configuration</label>
+                                <div class="btn-group-vertical btn-group-sm d-flex" role="group">
+                                    <input type="radio" class="btn-check" name="htmlconf" id="txt-radio">
+                                    <label class="btn btn-outline-primary" for="txt-radio" title="This is the traditional HTMLization method.">
+                                        <i class="bi bi-badge-sd me-1"></i>HTMLize the plaintext
+                                    </label>
+                                    <input type="radio" class="btn-check" name="htmlconf" id="html-radio">
+                                    <label class="btn btn-outline-primary" for="html-radio" title="This is the modern HTMLization method.">
+                                        <i class="bi bi-badge-hd me-1"></i>Plaintextify the HTML
+                                    </label>
+                                </div>
+                                <label class="form-label fw-bold mt-4 mb-2" for="ptsize">Maximum font size</label>
+                                <input type="range" class="form-range" min="7" max="16" id="ptsize" oninput="ptdemo.value = ptsize.value">
+                                <label class="form-label fw-bold mt-4 mb-2">Page dependencies</label>
+                                <div class="btn-group-vertical btn-group-sm d-flex" role="group">
+                                    <input type="radio" class="btn-check" name="pagedeps" id="inline-radio">
+                                    <label class="btn btn-outline-primary" for="inline-radio" title="Generate larger, standalone web pages that do not require network access to render.">
+                                        <i class="bi bi-box me-1"></i>Inline
+                                    </label>
+                                    <input type="radio" class="btn-check" name="pagedeps" id="reference-radio">
+                                    <label class="btn btn-outline-primary" for="reference-radio" title="Generate regular web pages that require network access to render.">
+                                        <i class="bi bi-link-45deg me-1"></i>Reference
+                                    </label>
+                                </div>
+                                <label class="form-label fw-bold mt-4 mb-2">Citation links</label>
+                                <div class="btn-group-vertical btn-group-sm d-flex" role="group">
+                                    <input type="radio" class="btn-check" name="reflinks" id="refsection-radio">
+                                    <label class="btn btn-outline-primary" for="refsection-radio" title="Citation links go to the reference section.">
+                                        <i class="bi bi-arrow-clockwise"></i> Go to reference section
+                                    </label>
+                                    <input type="radio" class="btn-check" name="reflinks" id="citation-radio">
+                                    <label class="btn btn-outline-primary" for="citation-radio" title="Citation links go directly to the cited document.">
+                                        <i class="bi bi-link-45deg me-1"></i>Go to linked document
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    
+<script>
+  var _paq = window._paq || [];
+  
+  _paq.push(['disableCookies']);
+  _paq.push(['trackPageView']);
+  _paq.push(['enableLinkTracking']);
+  (function() {
+    var u="//analytics.ietf.org/";
+    _paq.push(['setTrackerUrl', u+'matomo.php']);
+    _paq.push(['setSiteId', 7]);
+    var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
+    g.type='text/javascript'; g.async=true; g.defer=true; g.src=u+'matomo.js'; s.parentNode.insertBefore(g,s);
+  })();
+</script>
+<noscript><p><img src="//analytics.ietf.org/matomo.php?idsite=7" style="border:0;" alt="" /></p></noscript>
+
+    <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a283dcf1ed0c566f',t:'MTc4NjI0ODEyMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

@@ -21,6 +21,16 @@ SPDX-FileCopyrightText = "1999 The Internet Society"
 SPDX-License-Identifier = "LicenseRef-IETF"
 
 [[annotations]]
+path = "tests/fixtures/rfc8288.html"
+SPDX-FileCopyrightText = "2017 IETF Trust and the persons identified as the document authors"
+SPDX-License-Identifier = "LicenseRef-IETF"
+
+[[annotations]]
+path = "tests/fixtures/draft-thomson-hybi-http-timeout-03.html"
+SPDX-FileCopyrightText = "2012 IETF Trust and the persons identified as the document authors"
+SPDX-License-Identifier = "LicenseRef-IETF"
+
+[[annotations]]
 path = "tests/fixtures/markdown_syntax.md"
 SPDX-FileCopyrightText = "2004 John Gruber"
 SPDX-License-Identifier = "BSD-3-Clause"
