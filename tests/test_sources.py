@@ -8,7 +8,7 @@ import pytest
 
 from apysource.sources import load_sources, sources_from_data
 
-RFC_URL = "https://www.rfc-editor.org/rfc/rfc9110.txt"
+RFC_URL = "https://www.rfc-editor.org/rfc/rfc9110.html"
 
 
 def _write(tmp_path, text):
@@ -34,7 +34,7 @@ def test_a_name_in_no_entry_at_all_still_resolves():
     sources = sources_from_data({"sources": []})
     minted = sources.resolve("RFC 9110")
 
-    assert minted == {"label": "RFC 9110", "url": RFC_URL, "type": "text/plain"}
+    assert minted == {"label": "RFC 9110", "url": RFC_URL}
 
 
 def test_an_entry_beats_a_pattern():
@@ -86,7 +86,9 @@ sources:
 
     entry = sources.entries["RFC 9110"]
     assert entry["url"] == RFC_URL
-    assert entry["type"] == "text/plain"
+    # No `type`: the repo that claims this url decides which rendition answers
+    # for it, and it decides that after this entry has been completed.
+    assert "type" not in entry
     assert entry["fragments"][0]["label"] == "host_header"   # and it kept its own
 
 
@@ -130,7 +132,7 @@ def test_a_malformed_sources_file_is_refused_by_the_real_loader(tmp_path):
         load_sources(_write(tmp_path, """\
 sources:
   - label: RFC 9110
-    url: https://www.rfc-editor.org/rfc/rfc9110.txt
+    url: https://www.rfc-editor.org/rfc/rfc9110.html
     fragments:
       - label: x
         snipet: "typo"

@@ -423,7 +423,7 @@ sources:
 
 # ── A name is enough, when a pattern knows the family ────────────────────
 
-RFC_URL = "https://www.rfc-editor.org/rfc/rfc9110.txt"
+RFC_URL = "https://www.rfc-editor.org/rfc/rfc9110.html"
 
 
 def _one(g, predicate):
@@ -443,7 +443,9 @@ sources:
         snippet: "a quote long enough to be taken seriously"
 """))
     assert _one(g, SCHEMA.url) == RFC_URL
-    assert _one(g, DCTERMS.format) == "text/plain"
+    # And no format at all: a family that also named a media type would be
+    # asserting which rendition came back, which is the repo's answer to give.
+    assert not list(g.objects(None, DCTERMS.format))
 
 
 def test_a_named_source_and_a_written_one_mean_the_same_thing(tmp_path):
@@ -460,7 +462,6 @@ sources:
 sources:
   - label: "RFC 9110"
     url: "{RFC_URL}"
-    type: text/plain
     fragments:
       - label: "f"
         snippet: "a quote long enough to be taken seriously"

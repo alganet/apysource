@@ -35,12 +35,15 @@ you would have to give each one a second, *forward* template — which is precis
 ``SourcePattern``, wearing a repo's name. So that is what they declare: see
 ``BaseRepo.family``, and ``DEFAULT_PATTERNS`` below.
 
-The families that ship are of two kinds, and the split is the point:
+**This module ships no family of its own.** Every one of them is declared by the
+repo that fetches it, because how you name an MDN page is MDN's knowledge, how
+you name an RFC is rfc-editor's, and this module has none of it.
 
-* ``RFC NNNN`` — declared *here*, because no repo claims rfc-editor. Patterns exist
-  for exactly this gap: a family with a uniform URL and nobody to fetch it specially.
-* ``MDN <page>``, ``Gutenberg <id>``, and the rest — declared by *their repos*, because
-  how you name an MDN page is MDN's knowledge and this module has none.
+A ``patterns:`` block is what you write when there is a uniform family and *no
+repo claims it* — ``W3C <slug>`` is one. Nothing special is needed to read a W3C
+page: the generic fetcher gets it and the HTML reader reads it. All that was
+missing was the step from a name to a URL, and that is three lines of your own
+YAML rather than a release of this package.
 """
 
 from __future__ import annotations
@@ -54,6 +57,7 @@ from typing import Any
 from apysource.repos.archive import ArchiveRepo
 from apysource.repos.gutenberg import GutenbergRepo
 from apysource.repos.mdn import MdnRepo
+from apysource.repos.rfc import RfcRepo
 from apysource.repos.wikisource import WikisourceRepo
 from apysource.repos.wiktionary import WiktionaryRepo
 from apysource.schema import SOURCE_KEYS, reject_unknown_keys, text
@@ -94,29 +98,25 @@ PATTERN_KEYS = frozenset({"match", "source"})
 #: that matched; ``fragments`` are a citation's business, not a family's.
 TEMPLATE_KEYS = SOURCE_KEYS - {"label", "fragments"}
 
-#: The one family that is this module's own, because no repo claims rfc-editor:
-#: `check` falls through to the generic fetcher and `RfcTextFormat` reads it. This
-#: is the gap patterns exist for.
-RFC_FAMILY: dict[str, Any] = {
-    "match": r"^RFC (?P<n>\d+)$",
-    "source": {
-        "url": "https://www.rfc-editor.org/rfc/rfc{n}.txt",
-        "type": "text/plain",
-    },
-}
-
-#: The repos whose families ship. The same five the default registry wires — but
+#: The repos whose families ship. The same six the default registry wires — but
 #: these are the *classes*, and no instance is built: a family is data a repo
 #: declares, not a thing it does. Hence no apywire, no `_defaults`, no compile
 #: step, and no release standing between a user and a name that resolves.
-SHIPPED_REPOS = [ArchiveRepo, GutenbergRepo, MdnRepo, WikisourceRepo, WiktionaryRepo]
+SHIPPED_REPOS = [ArchiveRepo, GutenbergRepo, MdnRepo, RfcRepo,
+                 WikisourceRepo, WiktionaryRepo]
 
 #: The shipped patterns, tried *after* whatever the sources file declares — so a
-#: project that wants RFC 9110 from datatracker, or as HTML, writes one entry and
-#: wins. A family of your own is a `patterns:` block, not a release of this package.
+#: project that wants RFC 9110 from some other publisher writes one entry and wins.
+#: A family of your own is a `patterns:` block, not a release of this package.
+#:
+#: Every entry comes from a repo now. `RFC NNNN` was the exception and was declared
+#: here, on the argument that no repo claimed rfc-editor — which was true, and was
+#: the defect rather than the design: nothing bound the URL this minted to anything
+#: that would go and read it, so the two could disagree and only a failing citation
+#: would say so. A repo's family is checked against its own `url_pattern` by
+#: `test_patterns`, which is a guarantee this list could not previously offer.
 DEFAULT_PATTERN_DATA: list[dict[str, Any]] = [
-    RFC_FAMILY,
-    *(family for repo in SHIPPED_REPOS if (family := repo.family()) is not None),
+    family for repo in SHIPPED_REPOS if (family := repo.family()) is not None
 ]
 
 

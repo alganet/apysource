@@ -25,10 +25,14 @@ MDN = {"match": r"^MDN (?P<page>.+)$",
 # ── Minting ──────────────────────────────────────────────────────────────
 
 def test_the_shipped_pattern_mints_an_rfc():
-    """A project whose every citation names an RFC writes no sources file at all."""
+    """A project whose every citation names an RFC writes no sources file at all.
+
+    No `type`: `RfcRepo` claims this URL and answers for it, and a family that
+    also declared a media type would be asserting which rendition came back —
+    which is the repo's decision and is made after this template has run.
+    """
     assert mint_source("RFC 9110") == {
-        "url": "https://www.rfc-editor.org/rfc/rfc9110.txt",
-        "type": "text/plain",
+        "url": "https://www.rfc-editor.org/rfc/rfc9110.html",
     }
 
 
@@ -61,7 +65,7 @@ def test_an_entry_key_beats_the_template():
     entry = {"label": "RFC 9110", "type": "text/html", "title": "HTTP Semantics"}
     completed = complete(entry, DEFAULT_PATTERNS)
 
-    assert completed["url"] == "https://www.rfc-editor.org/rfc/rfc9110.txt"
+    assert completed["url"] == "https://www.rfc-editor.org/rfc/rfc9110.html"
     assert completed["type"] == "text/html"       # the entry's, not the pattern's
     assert completed["title"] == "HTTP Semantics"
 
@@ -80,14 +84,18 @@ def test_an_entry_with_a_url_is_left_alone():
 
 # ── A repo's own family, and the drift it could hide ─────────────────────
 
-def test_the_shipped_families_are_rfc_plus_every_repos_own():
-    """`RFC` is declared in patterns.py because no repo claims rfc-editor — that
-    gap is exactly what patterns are *for*. Every other shipped family is declared
-    by the repo that fetches it, because how you name an MDN page is MDN's
-    knowledge and patterns.py has none."""
+def test_every_shipped_family_is_declared_by_the_repo_that_fetches_it():
+    """patterns.py ships none of its own, and `RFC` was the last one it did.
+
+    It was declared there on the argument that no repo claimed rfc-editor, which
+    was true and was the defect rather than the design: nothing bound the URL it
+    minted to anything that would go and read it. `RFC 9110` is now covered by
+    `test_a_repos_family_mints_a_url_that_repo_itself_claims` below, like every
+    other family — a guarantee this list could not previously offer.
+    """
     matches = {p.pattern.pattern for p in DEFAULT_PATTERNS}
 
-    assert r"^RFC (?P<n>\d+)$" in matches
+    assert len(DEFAULT_PATTERNS) == len(SHIPPED_REPOS)
     for repo in SHIPPED_REPOS:
         assert repo.family() is not None, f"{repo.NAME} declares no name family"
         assert repo.NAME_MATCH in matches
