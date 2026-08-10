@@ -327,14 +327,25 @@ def _load_repo_text(result: RepoResult, max_chars: int | None, *,
     # URL verified green, because the repo returned the whole page and the
     # snippet was found somewhere in it. The identical fragment on a fetched URL
     # failed, correctly. Which answer you got depended on who served the file.
+    #
+    # It runs with no locator too, exactly as the fetcher path does. A repo hands
+    # back a *document*, not necessarily prose: one that returns markup was, for
+    # an untargeted fragment, checked against its own tags, where a quote can
+    # match a running header or an href and the page's real sentences — split by
+    # every inline link — can match nothing at all. Asking the format what the
+    # document says is the same question in both lanes, so it is asked the same
+    # way. For a repo whose text is already prose this changes nothing: the
+    # plain-text, Markdown and wikitext readers all answer with what they were
+    # given.
     formats = cache.formats if cache is not None else DEFAULT_FORMATS
     format_name, locator = _apply_targeting(result, text, formats)
-    if locator:
-        try:
-            text = extract_content(text, locator, format_name=format_name,
-                                   formats=formats, strict=True)
-        except SectionNotFound as e:
-            return TextOutcome("", "no_section", e.message)
+    try:
+        text = extract_content(text, locator, format_name=format_name,
+                               formats=formats, strict=True)
+    except SectionNotFound as e:
+        # Only reachable with a locator: no selector means the whole document,
+        # and the whole document is never a section that went missing.
+        return TextOutcome("", "no_section", e.message)
 
     return TextOutcome(truncate(text, max_chars))
 

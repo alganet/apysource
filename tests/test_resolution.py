@@ -723,6 +723,43 @@ def test_a_repo_section_scopes_the_snippet_like_a_fetched_one(tmp_path):
         "the sentence is not in § Syntax; the section must scope the match"
 
 
+_PAGE = (
+    '<body><span class="grey">RFC 9110      HTTP Semantics      June 2022</span>\n'
+    '<p>A sender MUST NOT generate a <a href="./rfc9110#section-5.5">field value'
+    "</a> that contains control characters.</p></body>"
+)
+
+
+def test_a_repo_that_returns_a_page_is_read_as_a_page_not_as_markup(tmp_path):
+    """An untargeted fragment skipped the format machinery altogether.
+
+    A `section:` or `selector:` sent the repo's text through `extract_content`;
+    saying nothing at all sent it nowhere, and the snippet was matched against
+    whatever bytes the repo handed back. For a repo that returns prose nobody
+    could tell. For one that returns markup it is two defects at once: a quote
+    can match an `href` or a running header that no reader ever saw, and the
+    page's own sentences cannot match, because every inline link cuts one in
+    half. Here `generate a field value that contains` is a contiguous sentence
+    to a reader and straddles an `<a>` in the source.
+
+    The fetcher path always asked. Now both do, and they ask the same function.
+    """
+    repo = _repo_with(tmp_path, _PAGE)
+    g = build_chain_graph(URIRef("urn:test:frag"), URIRef("urn:test:src"),
+                          "https://example.com/doc", location="")
+
+    result = resolve_chain(g, URIRef("urn:test:frag"), RepoRegistry([repo]),
+                           fetcher=MockFetcher())
+    assert isinstance(result, RepoResult)
+
+    outcome = load_text(result, max_chars=None)
+    assert outcome.status == "ok", outcome.reason
+    assert "A sender MUST NOT generate a field value that contains" in outcome.text, \
+        f"the page's own sentence must survive the link inside it, got {outcome.text!r}"
+    assert "href=" not in outcome.text and "<span" not in outcome.text, \
+        "the markup is not what the page says"
+
+
 # ── The anchor the citation already carried (C3) ─────────────────────────
 
 _RFC_ISH = ("# 7. Fields\nFields are things.\n\n"
