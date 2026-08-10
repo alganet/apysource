@@ -12,6 +12,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-10
+
 ### Changed
 - **An RFC comes from a repository, not from a content format.** `RfcTextFormat` modelled
   a publisher's page layout as a media type, which is the wrong level of abstraction: an
