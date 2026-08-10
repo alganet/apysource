@@ -87,8 +87,15 @@ logger = logging.getLogger(__name__)
 DOCUMENT_CONTAINERS = "div.rfcmarkup, div.rfchtml, #content"
 
 #: Classes the publisher puts on things a reader is not meant to read as text:
-#: the running header, the ``[Page 12]`` footer, the print-only rules.
-FURNITURE_CLASSES = frozenset({"grey", "noprint"})
+#: the running header, the ``[Page 12]`` footer, the print-only rules — and, in
+#: the modern rendition, the ``¶`` self-link at the end of every paragraph.
+#:
+#: The pilcrow is an affordance for linking to a paragraph, not a character the
+#: document says, and it lands exactly where a quote is most likely to cross:
+#: RFC 9111 alone carries 380 of them, one of which sits in the middle of the
+#: list a cache walks to work out an expiry, so quoting two of those bullets
+#: together was impossible.
+FURNITURE_CLASSES = frozenset({"grey", "noprint", "pilcrow"})
 
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 
@@ -345,8 +352,18 @@ def render(raw: str) -> str:
 
     soup = BeautifulSoup(raw, "html.parser")
     root = document_root(soup)
+
     if not is_preformatted(root):
-        return raw
+        # A modern rendition is already the thing this function is trying to
+        # produce, so the only thing done to it is dropping the furniture — and
+        # if it has none, it comes back the bytes it arrived as.
+        furniture = [el for cls in FURNITURE_CLASSES
+                     for el in root.select(f".{cls}")]
+        if not furniture:
+            return raw
+        for el in furniture:
+            el.decompose()
+        return str(soup)
 
     out = BeautifulSoup("<html><body></body></html>", "html.parser")
     return str(promote(root, out))

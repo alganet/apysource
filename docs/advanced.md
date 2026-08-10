@@ -370,8 +370,11 @@ rfc-editor publishes two htmlizations, and the repo tells them apart by shape
 rather than by date or host:
 
 - **Modern** (xml2rfc v3, roughly RFC 8650 onward) is a real HTML document and is
-  passed through untouched. It has `<pre>` elements of its own — ABNF, frame
-  diagrams — and flattening those would lose artwork a citation may be quoting.
+  passed through with only its furniture removed — the `¶` self-link the renderer
+  puts at the end of every paragraph, which is an affordance and not a character
+  the document says. Nothing else is done to it: it has `<pre>` elements of its
+  own — ABNF, frame diagrams — and flattening those would lose artwork a citation
+  may be quoting.
 - **Legacy** is the paginated text inside one `<pre>`, with headings drawn as
   `<span class="h3">` and anchors threaded through. It is rebuilt into the modern
   shape on read: headings hoisted out, prose re-emitted as blocks split at blank

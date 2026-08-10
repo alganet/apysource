@@ -114,6 +114,30 @@ def test_a_modern_rendition_is_passed_through_untouched():
     assert _section(MODERN, "§ 1") == "This document does a thing. example = 1*DIGIT"
 
 
+def test_a_paragraph_self_link_is_not_a_character_the_document_says():
+    """Markup copied from RFC 9111 § 4.2.1, where this was found.
+
+    The modern rendition ends every paragraph with a `¶` that links to it — an
+    affordance, not text. It lands exactly where a quote is most likely to cross,
+    and RFC 9111 carries 380 of them, one in the middle of the list a cache walks
+    to work out an expiry: quoting two of those bullets together was impossible,
+    because between them the document appeared to say `use its value, or¶ If the
+    Expires response header field`.
+    """
+    raw = (
+        "<html><body><section id=\"section-4.2.1\">"
+        "<h3>4.2.1. Calculating Freshness Lifetime</h3>"
+        '<ul><li><p>If the max-age response directive is present, use its value, or'
+        '<a class="pilcrow" href="#section-4.2.1-2.1">¶</a></p></li>'
+        '<li><p>If the Expires response header field is present, use its value.'
+        '<a class="pilcrow" href="#section-4.2.1-2.2">¶</a></p></li></ul>'
+        "</section></body></html>"
+    )
+    text = _section(render(raw), "§ 4.2.1")
+    assert "¶" not in text
+    assert "use its value, or If the Expires response header field" in text
+
+
 def test_the_shape_is_what_decides_not_the_publisher():
     from bs4 import BeautifulSoup
 
