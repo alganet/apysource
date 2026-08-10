@@ -174,6 +174,59 @@ def test_paragraph_numbering_addresses_distinct_paragraphs():
     assert first != second
 
 
+def test_a_heading_too_long_for_one_line_is_still_one_heading():
+    """Markup copied from RFC 7240 § 4.4, where this was found.
+
+    A heading wider than the column is drawn as *two* heading elements, and the
+    continuation carries no anchor. Emitted as two sections, § 4.4 owns the
+    heading and no text at all — every word of it hangs under a phantom section
+    called `Preferences`. That is worse than a miss: the section resolves, so
+    strict mode never fires, and all three citations into it fail as though the
+    quotes were wrong.
+    """
+    raw = (
+        "<pre>"
+        '<span class="h3"><a class="selflink" id="section-4.3">4.3</a>.  Wait'
+        "</span>\n\n   Wait text.\n\n"
+        '<span class="h3"><a class="selflink" id="section-4.4">4.4</a>.  The '
+        '"handling=strict" and "handling=lenient" Processing</span>\n'
+        '<span class="h3">      Preferences</span>\n\n'
+        "   The preferences indicate how to handle error conditions.\n"
+        "</pre>"
+    )
+    document = render(raw)
+
+    assert _section(document, "§ 4.4") == \
+        "The preferences indicate how to handle error conditions."
+
+    from apysource.sections import section_labels
+    tree = HtmlFormat().sections(document)
+    assert section_labels(tree) == ["§ 4.3", "§ 4.4"]
+    # And the wrapped half is part of the title, not lost with the phantom.
+    assert tree.children[1].title.endswith("Processing Preferences")
+
+
+def test_an_unanchored_heading_after_real_content_is_its_own_section():
+    """The join is conditional, and this is what it is conditional on.
+
+    Only whitespace may stand between the two halves of a wrapped heading. A
+    heading with no anchor that follows actual prose is a heading the publisher
+    simply did not anchor, and swallowing it into the one above would merge two
+    sections and hand a citation the wrong scope.
+    """
+    raw = (
+        "<pre>"
+        '<span class="h2"><a class="selflink" id="section-1">1</a>.  Intro</span>\n'
+        "\n   Intro text.\n\n"
+        '<span class="h2">Acknowledgements</span>\n'
+        "\n   Thanks to everyone.\n"
+        "</pre>"
+    )
+    from apysource.sections import section_labels
+    labels = section_labels(HtmlFormat().sections(render(raw)))
+    assert labels == ["§ 1", "Acknowledgements"], labels
+
+
 def test_an_appendix_is_addressable_on_a_real_document():
     """Both generations print `Appendix A. …` and anchor it `#appendix-A`.
 

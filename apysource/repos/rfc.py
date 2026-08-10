@@ -221,6 +221,8 @@ def promote(root: Any, out: Any) -> Any:
     titled: list[str] = []
     #: Whether a heading carrying a section anchor has been emitted yet.
     anchored: list[str] = []
+    #: The last heading emitted, so a heading that wrapped can be rejoined.
+    last_heading: Any = None
 
     def add_text(text: str) -> None:
         text = _WRAPPED_HYPHEN.sub("-", _PAGE_FOOTER.sub("", text))
@@ -263,8 +265,11 @@ def promote(root: Any, out: Any) -> Any:
             if level is None:
                 blocks[-1].append(child)
                 continue
-            flush()
             anchor = _heading_id(child)
+            pending = "".join(
+                item if isinstance(item, str) else item.get_text()
+                for block in blocks for item in block
+            )
 
             # The masthead: the headings before the first anchored one, which is
             # the document's title and — on datatracker — the draft's name under
@@ -282,6 +287,30 @@ def promote(root: Any, out: Any) -> Any:
                 if not titled:
                     titled.append(_collapse(child.get_text()))
                 continue
+
+            # A heading too long for the column width is marked up as *two*
+            # heading elements, the continuation carrying no anchor:
+            #
+            #   <span class="h3"><a id="section-4.4">4.4</a>.  The "handling=…"
+            #   and "handling=lenient" Processing</span>
+            #   <span class="h3">      Preferences</span>
+            #
+            # Emitted as two sections, § 4.4 owns the heading and *no text at
+            # all* — every word of it hangs under a phantom section called
+            # `Preferences`. That is worse than a miss: the section resolves, so
+            # nothing is reported, and every citation into it fails as though the
+            # quote were wrong. The join is conditional on nothing but whitespace
+            # having intervened, which is what distinguishes a wrapped line from
+            # a genuine unanchored heading further down the page.
+            if (anchor is None and last_heading is not None
+                    and last_heading.name == f"h{level}" and not pending.strip()):
+                last_heading.string = _collapse(
+                    f"{last_heading.get_text()} {child.get_text()}")
+                blocks.clear()
+                blocks.append([])
+                continue
+
+            flush()
             if anchor:
                 anchored.append(anchor)
 
@@ -290,6 +319,7 @@ def promote(root: Any, out: Any) -> Any:
                 heading["id"] = anchor
             heading.string = _collapse(child.get_text())
             body.append(heading)
+            last_heading = heading
 
     flush()
 
