@@ -187,8 +187,17 @@ def _title_prefix_number(title: str) -> str | None:
     optional dotted number, then the ``. `` the builder always inserts), so the
     letter form is admitted **only when a period follows** it. That lookahead is what
     keeps a plain heading such as ``Terminology`` from reporting a designator of ``T``.
+
+    The word may be printed in front of the letter — ``Appendix A. Notes`` — and
+    then ``§ A`` matched nothing and the citation widened silently to the whole
+    document. It is not an RFC habit: W3C, WHATWG and ECMA all label an appendix
+    this way, and a sub-heading one level down drops the word again (``A.1.``),
+    so a document reads inconsistently to this function unless the word is
+    admitted here. ``Annexation`` is not caught, because the space is required.
     """
-    match = re.match(r"^(\d+(?:\.\d+)*|[A-Z](?:\.\d+)*(?=\.))", title.strip())
+    match = re.match(
+        r"^(?:(?:Appendix|Annex)\s+)?(\d+(?:\.\d+)*|[A-Z](?:\.\d+)*(?=\.))",
+        title.strip())
     return match.group(1) if match else None
 
 
@@ -636,8 +645,12 @@ def simplify_selector(root: SectionNode, selector: str, snippet: str) -> str:
     return selector
 
 
-#: `#section-7.2` — the rfc-editor convention, and unambiguous wherever it appears.
-_ANCHOR_SECTION_RE = re.compile(r"^(?:section|sec)-(\d+(?:\.\d+)*)$", re.IGNORECASE)
+#: `#section-7.2` / `#appendix-A.1` — an anchor that spells out a section
+#: designator, and unambiguous wherever it appears. The appendix spellings were
+#: ignored, so an anchor naming a place *was read as naming nowhere* and the
+#: citation widened to the whole document.
+_ANCHOR_SECTION_RE = re.compile(
+    r"^(?:section|sec|appendix|app)-(\d+(?:\.\d+)*|[A-Z](?:\.\d+)*)$", re.IGNORECASE)
 
 
 def anchor_slug(title: str) -> str:
@@ -696,7 +709,10 @@ def selector_for_anchor(body: str, anchor: str, fmt) -> str | None:
 
     match = _ANCHOR_SECTION_RE.match(anchor)
     if match:
-        return f"§ {match.group(1)}"
+        # `#appendix-a` and `#appendix-A` are the same place, but the heading
+        # spells the letter one way and a selector is compared literally.
+        value = match.group(1)
+        return f"§ {value.upper() if value[:1].isalpha() else value}"
 
     title = _title_for_anchor(body, anchor, fmt)
     return selector_for_title(title) if title else None

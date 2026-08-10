@@ -174,6 +174,21 @@ def test_paragraph_numbering_addresses_distinct_paragraphs():
     assert first != second
 
 
+def test_an_appendix_is_addressable_on_a_real_document():
+    """Both generations print `Appendix A. …` and anchor it `#appendix-A`.
+
+    Neither spelling was understood, so `§ A` on this document extracted the
+    empty string — a citation of the appendix reported as a quote that is not in
+    a document that contains it. The sub-headings drop the word and always
+    worked, which is what made the gap look like a document being inconsistent
+    rather than a reader being.
+    """
+    document = render(LEGACY)
+    assert _section(document, "§ A").startswith(
+        "Header fields (Section 3) are only one serialisation of links")
+    assert _section(document, "§ A.1").startswith("HTML motivated the original")
+
+
 def test_the_document_is_labelled_by_its_title_not_by_section_one():
     """The legacy rendition has no `<title>`: the file begins at `<pre>`.
 

@@ -1379,6 +1379,44 @@ def test_an_rfc_style_anchor_becomes_a_section_selector():
     assert selector_for_anchor(doc, "section-7", md) == "§ 7"
 
 
+def test_an_appendix_anchor_becomes_a_section_selector_too():
+    """`#appendix-A.1` names a place, and it was read as naming nowhere.
+
+    The anchor spells a designator just as plainly as `#section-7.2` does, but
+    only the `section-` spelling was understood — so a citation carrying an
+    appendix anchor widened silently to the whole document and went on passing
+    after the passage moved out of the appendix it named.
+
+    The case is folded because a heading spells the letter one way and a
+    selector is compared literally: `#appendix-a` and `#appendix-A` are one
+    place, and only one of them would have matched `A. Sample`.
+    """
+    doc = ("# Appendix A. Pseudocode\nAppendix text.\n\n"
+           "## A.1. Sample decoding\nSample text.\n")
+    md = MarkdownFormat()
+    assert selector_for_anchor(doc, "appendix-A", md) == "§ A"
+    assert selector_for_anchor(doc, "appendix-a", md) == "§ A"
+    assert selector_for_anchor(doc, "app-A.1", md) == "§ A.1"
+
+
+def test_an_appendix_heading_may_print_the_word_in_front_of_the_letter():
+    """`Appendix A. Notes` and `A.1. Details` are one document's two habits.
+
+    W3C, WHATWG and ECMA all print the word on the top-level appendix heading
+    and drop it one level down, so a document that is perfectly consistent to a
+    reader looked inconsistent here: `§ A.1` resolved and `§ A` did not.
+    `Annexation` is not caught, because the space is required.
+    """
+    doc = ("# Appendix A. Notes on Other Serialisations\nAppendix text.\n\n"
+           "## A.1. In HTML\nHTML text.\n\n"
+           "# Annexation of Texas\nUnrelated text.\n")
+    md = MarkdownFormat()
+    assert "Appendix text." in extract_section(doc, "§ A", md)
+    assert "HTML text." in extract_section(doc, "§ A.1", md)
+    with pytest.raises(SectionNotFound):
+        extract_section(doc, "§ T", md, strict=True)
+
+
 def test_an_anchor_naming_a_heading_resolves_to_that_heading():
     """WHATWG's `#origin-header` sits on `<h3>3.2. \\`Origin\\` header</h3>`."""
     page = ('<html><body><h2 id="http-extensions">3. HTTP extensions</h2>'
