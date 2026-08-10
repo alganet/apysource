@@ -13,10 +13,10 @@ sources:
         section: "Article 2, paragraph 1"
         snippet: "The Organization and its Members, in pursuit of the Purposes stated in Article 1, shall act in accordance with the following Principles"
 
-  - label: "RFC 2616"
-    url: "https://www.rfc-editor.org/rfc/rfc2616.txt"
-    type: text/plain
+  # No url and no type: `RFC NNNN` is a name RfcRepo declares, so apysource
+  # already knows where the document lives and which rendition to read.
+  - label: "RFC 9110"
     fragments:
-      - label: "HTTP Overview"
-        lines: "40-41"
-        snippet: "The Hypertext Transfer Protocol (HTTP) is an application-level protocol"
+      - label: "Host header"
+        section: "§ 7.2"
+        snippet: "A user agent MUST generate a Host header field"

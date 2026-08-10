@@ -12,6 +12,84 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **An RFC comes from a repository, not from a content format.** `RfcTextFormat` modelled
+  a publisher's page layout as a media type, which is the wrong level of abstraction: an
+  RFC is a document family, and its publisher issues one document in several renditions at
+  once. Which of them a citation is checked against is a decision, and only something that
+  knows where the document comes from can make it — a format is handed bytes long after
+  that choice was made. `RfcRepo` makes it, and chooses the HTML.
+
+  **Breaking.** The `RFC NNNN` family now mints `https://www.rfc-editor.org/rfc/rfcNNNN.html`
+  instead of `.txt`, and declares no `type:` at all — the repo that claims the URL decides
+  which rendition answers, and it decides after the template has run. Every generated
+  sources file changes. `lines:` no longer addresses an rfc-editor URL, and neither does
+  `location:`: there is nothing below an RFC with a stable address, and a line number into
+  a paginated rendition names a different passage after the next revision. `section:` is
+  the address.
+
+  The repo claims `datatracker.ietf.org/doc/html` and the `ietf.org` I-D archive too.
+  rfc-editor publishes no drafts, and the archive serves a 2012 draft only as plain text,
+  so datatracker's rendering is the only rendition of one that carries section anchors.
+
+  Measured over a 1165-citation corpus spanning the 32 RFCs available in both renditions:
+  **1154 resolve**, against 854 for the raw htmlization read as HTML and 1165 for the text
+  rendition it replaces. Every legacy-generation RFC in that set is at 100%. The eleven
+  that do not resolve are all quotes of `.txt` *layout* — collected-ABNF lines run together
+  by the 72-column wrap, and table rows carrying the `|` characters that drew the box.
+
+### Fixed
+- **A legacy htmlization's sections were unaddressable, and datatracker's answered with the
+  wrong text.** rfc-editor has two htmlizations. The modern one (xml2rfc v3) is a real HTML
+  document; the legacy one is the paginated text inside a single `<pre>` with not one
+  heading element in the file. Asked for `§ 2` of `draft-thomson-hybi-http-timeout-03`, an
+  HTML reader answered:
+
+  > `Internet-Draft HTTP Keep-Alive July 2012 which is unlikely to be visible to the HTTP
+  > implementation, compounds this effect. Clients are advised to make allowances for del…`
+
+  — a running header and the tail of § 1. Not an empty extraction somebody would
+  investigate: the wrong section's text, silently, so a quote taken from § 1 verified green
+  against a citation claiming § 2. `RfcRepo.render` rebuilds that shape into the modern one,
+  telling the two apart **structurally** — a heading inside a `<pre>` — never by RFC number
+  or by host, either of which would be wrong at the boundary, wrong for drafts, and wrong
+  the day a publisher re-renders its archive.
+
+- **An appendix is addressable by the letter it prints.** `#appendix-A.1` spells a section
+  designator exactly as plainly as `#section-7.2`, and only the second was understood; a
+  heading of `Appendix A. Notes` printed the word in front of the letter, and `§ A` matched
+  nothing. Both failed the same quiet way — the citation widened to the whole document and
+  went on passing after the passage moved out of the appendix it named. Neither is an RFC
+  habit; W3C, WHATWG and ECMA all label an appendix this way. This recovered 21 citations of
+  RFC 9110's collected-ABNF appendix in the corpus above.
+
+- **A repo's document is read as a document, not as markup.** A fragment with no targetter
+  never entered the format machinery on the repo path, so its snippet was matched against
+  whatever bytes the repo handed back. Every repo shipping then returned prose, so nothing
+  could tell; for one returning a page it is two defects at once — a quote can match an
+  `href` or a running header no reader saw, and the page's own sentences cannot match,
+  because every inline link cuts one in half.
+
+### Removed
+- **`RfcTextFormat`**, and with it ~200 lines of page-break, running-header, wrapped-hyphen
+  and indented-heading inference. Its `detect()` sniffed for a *publisher* — two dotted
+  headings, a form feed and the words "Request for Comments:" were enough to claim a
+  changelog or a mailing-list archive. Its section grammar inferred structure from the shape
+  of a line, where the `id="section-2.1"` anchors state it outright and do so identically
+  across both htmlization generations. The wrapped-hyphen rejoin survives, in `repos/rfc.py`,
+  applied to the identical wrap in the legacy htmlization.
+- **`patterns.RFC_FAMILY`.** It was the one family `patterns.py` declared itself, on the
+  argument that no repo claimed rfc-editor — which was true, and was the defect rather than
+  the design: nothing bound the URL it minted to anything that would go and read it. Every
+  shipped family is now declared by its repo and checked against that repo's own
+  `url_pattern`.
+- **The `"rfc"` MIME alias**, and with it the `text/plain` collision. Two formats claimed
+  that media type, so it resolved to neither and the caller fell through to sniffing the
+  body — a source that said exactly what it was got the same treatment as one that said
+  nothing. `text/plain` now names one reader.
+- **`tests/fixtures/rfc2616.txt`** (422 KB, the largest file in the tree), replaced by a
+  66 KB real legacy htmlization that exercises more of the reader than it could.
+
 ## [0.8.1] - 2026-08-06
 
 ### Fixed

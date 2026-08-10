@@ -318,10 +318,11 @@ The generic path (CSS selectors, line ranges, section selectors) works for most 
 | `ArchiveRepo`    | archive.org       | `lines:N-M`                   |
 | `GutenbergRepo`  | Project Gutenberg | `chapter:N`, title match      |
 | `MdnRepo`        | MDN (`en-US`)     | section path, e.g. `Syntax`   |
+| `RfcRepo`        | RFCs and I-Ds     | — (address with `section:`)   |
 | `WikisourceRepo` | Wikisource        | `section:Name`, subpage match |
 | `WiktionaryRepo` | Wiktionary        | term name, `language/section` |
 
-All built-in repos are enabled by default. Most URLs work without a specialized repo — the generic fetcher + targetters (section selectors, CSS, line ranges) handle any web page. Repos are for sources that need multi-page crawling or domain-specific extraction. To customize URL patterns or add your own repos, use a TOML config file. See `defaults.toml`.
+All six built-in repos are enabled by default. Most URLs work without a specialized repo — the generic fetcher + targetters (section selectors, CSS, line ranges) handle any web page. Repos are for sources that need multi-page crawling or domain-specific extraction. To customize URL patterns or add your own repos, use a TOML config file. See `defaults.toml`.
 
 ### MDN
 
@@ -340,8 +341,9 @@ Three things follow from checking the source rather than the page:
   specifications tables, live samples and sidebars are not in the source file
   and cannot be reconstructed from it. A quote of one fails, and the failure
   shows a `⟨macro⟩` mark where the generated text would have been.
-- **MDN fragments target with `location:`, not `section:`.** A repo is handed
-  only the location hint, so a `section:` on an MDN fragment is ignored.
+- **`location:` is MDN's own hint, and `section:` still applies on top of it.**
+  The repo narrows to the section path it was given, and the fragment's own
+  targetters then run exactly as they would on a fetched page.
 
 Only `en-US` URLs are handled. Translations live in a different repository
 (`mdn/translated-content`), so other locales fall through to the generic
@@ -350,6 +352,45 @@ fetcher — weaker (they are redirect-warned, not canonical-enforced), but hones
 Known limitation: `mdn_base_url` ends in `main`, a moving ref, so the text a
 citation is checked against can change between runs with no signal. Put a commit
 SHA where `main` is to pin it.
+
+### RFCs and Internet-Drafts
+
+`RfcRepo` claims rfc-editor.org, `datatracker.ietf.org/doc/html` and the
+`ietf.org` I-D archive, and reads the **HTML** rendition of whatever it is asked
+for. `rfc9110.txt`, `rfc9110.html` and datatracker's `/doc/html/rfc9110` are one
+cached document: the extension is a rendition, not an identity.
+
+The HTML is chosen because the plain text is a 72-column rendering with page
+furniture inside it — a running header and a `[Page 12]` footer every 58 lines,
+and words split at the wrap. Reading it means undoing all of that by inference.
+The HTML states the same things structurally, and every section carries
+`id="section-7.2"`, which is what `#section-7.2` in a cited URL resolves against.
+
+rfc-editor publishes two htmlizations, and the repo tells them apart by shape
+rather than by date or host:
+
+- **Modern** (xml2rfc v3, roughly RFC 8650 onward) is a real HTML document and is
+  passed through untouched. It has `<pre>` elements of its own — ABNF, frame
+  diagrams — and flattening those would lose artwork a citation may be quoting.
+- **Legacy** is the paginated text inside one `<pre>`, with headings drawn as
+  `<span class="h3">` and anchors threaded through. It is rebuilt into the modern
+  shape on read: headings hoisted out, prose re-emitted as blocks split at blank
+  lines, page furniture dropped, words rejoined across the wrap. Datatracker's
+  rendering of an old draft is the same shape and gets the same treatment.
+
+Two consequences worth knowing:
+
+- **The cache holds the rendition as served**, and normalization happens on read.
+  A fix to the reader reaches every already-cached document with no `--refresh`.
+- **`location:` and `lines:` do not address an RFC.** There is nothing below the
+  document with a stable address, and a line number into a paginated rendition
+  names a different passage after the next revision. `section:` is the address,
+  and it works on appendices too — `§ A.1`, from a heading printed
+  `Appendix A.1.` or an anchor spelled `#appendix-A.1`.
+
+Known limitation: an unversioned draft id (`draft-ietf-httpbis-rfc6265bis`)
+resolves to whatever datatracker calls current, so the text behind a citation can
+change with no signal. Cite `-08` and it is pinned.
 
 ### Fetching on demand
 

@@ -115,16 +115,16 @@ apysource supports several ways to pinpoint where in a document your snippet liv
 
 | Targetter         | Key        | Example                  | Best for                                             |
 |-------------------|------------|--------------------------|------------------------------------------------------|
-| **Section**       | `section`  | `"Chapter I, Article 1"` | Structured documents (HTML, Markdown, Wikitext, RFC) |
+| **Section**       | `section`  | `"Chapter I, Article 1"` | Structured documents (HTML, Markdown, Wikitext)      |
 | **CSS selector**  | `selector` | `"div.content p"`        | HTML pages                                           |
-| **Line range**    | `lines`    | `"40-41"`                | Plain text, RFCs                                     |
+| **Line range**    | `lines`    | `"40-41"`                | Plain text                                           |
 | **Repo location** | `location` | `"chapter:1"`            | Repository modules (Gutenberg, Wikisource, etc.)     |
 
-**Section selectors** are the most versatile — they work across HTML, Markdown, Wikitext, and RFC plain text. They support roman numeral equivalence (`Chapter IV` = `Chapter 4`), nested paths (`Chapter I, Article 1, paragraph 2`), and quoted titles (`'The Fox and the Grapes'`).
+**Section selectors** are the most versatile — they work across HTML, Markdown and Wikitext, and so across every RFC, which arrives as HTML. They support roman numeral equivalence (`Chapter IV` = `Chapter 4`), nested paths (`Chapter I, Article 1, paragraph 2`), and quoted titles (`'The Fox and the Grapes'`).
 
 **CSS selectors** target HTML elements directly. Useful when section headings aren't available or you need a specific element.
 
-**Line ranges** extract by line number (1-based, inclusive). Useful for plain text and RFCs.
+**Line ranges** extract by line number (1-based, inclusive). Useful for plain text — a document with no structure to name.
 
 If no targetter is given, apysource checks the full page text for your snippet.
 
@@ -187,9 +187,9 @@ sources:
   - label: Gutenberg 2701
 ```
 
-Six families ship: `RFC NNNN`, and one for each repo — `MDN <page>`,
-`Gutenberg <id>`, `Wikisource <page>`, `Wiktionary <word>`, `Archive <item>`. A
-family of your own is three lines, and it is not a release of this package:
+Six families ship, one for each repo: `RFC <n>`, `MDN <page>`, `Gutenberg <id>`,
+`Wikisource <page>`, `Wiktionary <word>`, `Archive <item>`. A family of your own
+is three lines, and it is not a release of this package:
 
 ```yaml
 patterns:
@@ -198,7 +198,7 @@ patterns:
 ```
 
 Your patterns are tried before the shipped ones, and an entry with a `url` beats
-both — so pinning `RFC 9110` to datatracker is one entry. Within an entry, every
+both — so pinning `RFC 9110` to a mirror of your own is one entry. Within an entry, every
 key you write wins over the template: name the family for the URL, then say the
 `title` or the `part_of` the family cannot know.
 
@@ -223,11 +223,17 @@ substitution, no fetch, no cache, no 404-vs-outage. A repo is the machinery behi
 the URL: crawling, caching, and for MDN a rewrite to the authored Markdown in
 `mdn/content` with the KumaScript macros rendered.
 
-So they sit on opposite sides of the URL, and neither replaces the other. `RFC` is
-declared by apysource itself precisely *because* no repo claims rfc-editor — that
-gap is what patterns are for. Every other family is declared by the repo that
-fetches it, because how you name an MDN page is MDN's business. Name one, and it is
-claimed by its repo exactly as a URL you typed would be.
+So they sit on opposite sides of the URL, and neither replaces the other. Every
+family that *ships* is declared by the repo that fetches it, because how you name
+an MDN page is MDN's business and how you name an RFC is rfc-editor's. Name one,
+and it is claimed by its repo exactly as a URL you typed would be — which is also
+what keeps the two halves honest, since a family that minted a URL its own repo
+did not claim would be caught by nothing but a failing citation.
+
+A pattern is what you write when a uniform family has **no repo to claim it**.
+`W3C <slug>` above is one: nothing special is needed to read a W3C page — the
+generic fetcher gets it and the HTML reader reads it — and all that was missing
+was the step from a name to a URL.
 
 Adding a repo is a Python class and a release. Adding a pattern is three lines of
 your own YAML.
@@ -252,7 +258,7 @@ When the quote stops matching, the report ends with the place to open:
 
 ```
   [FAIL] Fragments: snippet verified............. 2/3
-         RFC 9112 (https://www.rfc-editor.org/rfc/rfc9112.txt) (1)
+         RFC 9112 (https://www.rfc-editor.org/rfc/rfc9112.html) (1)
            client_host_header: snippet not found in extracted content
              closest match (94% similar, § 3.2)
                source says: A client MUST send a Host header field ... request messages.
