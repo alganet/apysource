@@ -5,8 +5,10 @@
 """Tests for apysource.formats — content-format adapters."""
 
 from apysource.formats import (
+    DEFAULT_FORMATS,
     HtmlFormat,
     PlainTextFormat,
+    _find_format,
     detect_format,
     extract_content,
     locate_snippet,
@@ -155,6 +157,40 @@ def test_detect_plain_text():
 
 def test_detect_plain_text_with_angle_brackets():
     assert detect_format("x > y and a < b").name == "plain-text"
+
+
+# ── A media type that names one reader ──────────────────────────────────
+
+def test_text_plain_names_exactly_one_format():
+    """`text/plain` was claimed by two readers, so it selected neither.
+
+    An ambiguous media type resolves to nothing and the caller falls through to
+    sniffing the body — which meant a source that said exactly what it was got
+    the same treatment as one that said nothing, and the reader it ended up with
+    depended on a heuristic rather than on what its author had written down.
+    """
+    assert extract_content("line one\nline two\nline three", "2-2",
+                           format_name="text/plain") == "line two"
+    assert _find_format("text/plain", DEFAULT_FORMATS) is not None
+    assert _find_format("text/plain", DEFAULT_FORMATS).name == "plain-text"
+
+
+def test_two_formats_claiming_one_mime_still_fall_through_to_detection():
+    """The guard outlives the collision it was written for.
+
+    `default_formats` is a seam a caller can pass their own list through, and
+    picking whichever of two claimants happens to come first is not an answer.
+    Built by hand, because no shipped list collides any more.
+    """
+    class Rival:
+        name = "rival"
+        mime_type = "text/plain"
+
+        def detect(self, body):
+            return True
+
+    assert _find_format("text/plain", [*DEFAULT_FORMATS, Rival()]) is None
+    assert _find_format("rival", [*DEFAULT_FORMATS, Rival()]).name == "rival"
 
 
 # ── HtmlFormat.locate ──────────────────────────────────────────────────
@@ -358,22 +394,6 @@ def test_locate_never_returns_a_selector_that_does_not_lead_back():
 
 
 # ── A title is not the first heading (C2) ───────────────────────────────
-
-def test_an_rfc_is_labelled_by_its_title_not_by_section_one():
-    """`add` called every RFC it saw "1. Introduction".
-
-    It asked the format for its first *section heading*, which for an RFC is
-    always § 1. An RFC prints its real title in its header block, centred above
-    the Abstract.
-    """
-    from pathlib import Path
-    body = (Path(__file__).parent / "fixtures" / "rfc2616.txt").read_text(
-        encoding="utf-8")
-    fmt = detect_format(body)
-
-    assert fmt.title(body) == "Hypertext Transfer Protocol -- HTTP/1.1"
-    assert "Introduction" not in fmt.title(body)
-
 
 def test_a_markdown_title_comes_from_front_matter_when_there_is_some():
     """MDN's Origin page opens with `## Syntax`, so the heading rule named it that."""

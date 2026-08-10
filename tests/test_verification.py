@@ -853,26 +853,28 @@ def test_a_citation_past_the_first_100k_chars_is_still_found():
     citation into its status-code definitions came back as "snippet not found
     in extracted content": a flat claim about a document the check had never
     read to the end of. Nothing was bought by the cap. The substring test is
-    linear, and diagnosing a miss across the whole RFC takes a tenth of a
-    second.
+    linear, and diagnosing a miss across a whole specification takes a tenth of
+    a second.
 
     Every other snippet test patches ``load_text`` — which is the function
     that did the truncating — so none of them could ever have seen this. This
     one goes through the real thing.
     """
     from pathlib import Path
-    body = (Path(__file__).parent / "fixtures" / "rfc2616.txt").read_text()
-    snippet = "The Cache-Control general-header field is used to specify directives"
+    body = (Path(__file__).parent / "fixtures" / "un_charter.html").read_text(
+        encoding="utf-8")
+    snippet = ("The General Assembly and, under its authority, the Trusteeship "
+               "Council, in carrying out their functions")
 
     at = body.find(snippet)
     assert at > 100_000, "fixture no longer reaches past the old cap; pick a later passage"
 
     g, frag = _chain_graph_with_snippet(snippet)
     resolved = FetcherResult(
-        status="resolved", label="cache-control", source="RFC 2616",
-        url="http://example.com/rfc2616.txt",
+        status="resolved", label="trusteeship", source="UN Charter",
+        url="http://example.com/charter.html",
         fetcher=MockFetcher(content=body),
-        format_name="text/plain", locator=None,
+        format_name="text/html", locator=None,
     )
     checks_config = [{"name": "F", "class_uri": SV.Fragment, "mode": "chain"}]
     with patch("apysource.verification.resolve_chain", return_value=resolved):

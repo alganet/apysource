@@ -32,8 +32,8 @@ sources:
 
 LINES_YAML = """\
 sources:
-  - label: "RFC 2616"
-    url: "https://www.rfc-editor.org/rfc/rfc2616.txt"
+  - label: "Protocol Notes"
+    url: "https://example.org/notes.txt"
     type: plain-text
     fragments:
       - label: "HTTP Overview"

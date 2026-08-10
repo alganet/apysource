@@ -10,11 +10,9 @@ from apysource.formats import (
     HtmlFormat,
     MarkdownFormat,
     PlainTextFormat,
-    RfcTextFormat,
     WikitextFormat,
     detect_format,
     extract_content,
-    normalize_ws,
 )
 from apysource.sections import (
     SectionNode,
@@ -594,341 +592,25 @@ def test_wikitext_extract():
     assert "Hello world" in result
 
 
-# ── RFC text format ───────────────────────────────────────────────────
+# ── Generated selectors name the number, not the title ────────────────
 
-_RFC_SAMPLE = """\
-Network Working Group                                         J. Doe
-Request for Comments: 9999                                Company Inc.
-Category: Standards Track                              January 2026
+def test_generate_section_selector_uses_the_number():
+    """A selector says `§ 2`, not `§ 2 High-level overview`.
 
-
-                       Sample RFC Document
-
-Status of This Memo
-
-   This document specifies a sample protocol for testing.
-
-1.  Introduction
-
-   This is the introduction paragraph.
-
-   This is the second paragraph of the introduction.
-
-2.  Overview
-
-   High-level overview of the protocol.
-
-2.1.  Terminology
-
-   Key terms used in this document.
-
-2.2.  Requirements
-
-   Requirements for implementations.
-
-3.  Security Considerations
-
-   There are no security considerations.
-"""
-
-
-def test_rfc_detect():
-    assert RfcTextFormat().detect(_RFC_SAMPLE)
-
-
-def test_rfc_detect_not_plain_text():
-    """Regular plain text is not detected as RFC."""
-    assert not RfcTextFormat().detect("Just some plain text\nwith lines\n")
-
-
-def test_rfc_detect_not_html():
-    """HTML with RFC-like content is not detected as RFC."""
-    assert not RfcTextFormat().detect(
-        "<!DOCTYPE html><html><body>RFC 9999</body></html>")
-
-
-def test_rfc_detect_order():
-    """RFC is detected before plain text in the format chain."""
-    assert detect_format(_RFC_SAMPLE).name == "rfc"
-
-
-def test_rfc_sections_basic():
-    root = RfcTextFormat().sections(_RFC_SAMPLE)
-    # Top-level: Status of This Memo (unnumbered, not captured),
-    # 1. Introduction, 2. Overview, 3. Security Considerations
-    titles = [c.title for c in root.children]
-    assert any("Introduction" in t for t in titles)
-    assert any("Overview" in t for t in titles)
-    assert any("Security" in t for t in titles)
-
-
-def test_rfc_sections_nested():
-    root = RfcTextFormat().sections(_RFC_SAMPLE)
-    # Find section 2
-    sec2 = None
-    for child in root.children:
-        if child.title.startswith("2."):
-            sec2 = child
-            break
-    assert sec2 is not None
-    # Should have subsections 2.1 and 2.2
-    assert len(sec2.children) == 2
-    assert "Terminology" in sec2.children[0].title
-    assert "Requirements" in sec2.children[1].title
-
-
-def test_rfc_locate():
-    result = RfcTextFormat().locate(_RFC_SAMPLE, "second paragraph of the introduction")
-    assert result is not None
-    assert result.format_name == "section"
-    assert "§ 1" in result.locator
-
-
-def test_rfc_extract_by_section_number():
-    result = RfcTextFormat().extract(_RFC_SAMPLE, "§ 2.1, paragraph 1")
-    assert "Key terms" in result
-
-
-def test_rfc_roundtrip():
-    fmt = RfcTextFormat()
-    result = locate_section(_RFC_SAMPLE, "High-level overview", fmt)
-    assert result is not None
-    extracted = extract_content(_RFC_SAMPLE, result.locator, format_name="section")
-    assert "High-level overview" in extracted
-
-
-def test_rfc_form_feed_handling():
-    """Form feeds and page headers are stripped during section parsing."""
-    rfc_with_ff = """\
-Request for Comments: 8888
-
-1.  Introduction
-
-   First part of intro.
-\f
-Doe                      Standards Track                    [Page 1]
-
-   Second part of intro.
-
-2.  Next Section
-
-   Content here.
-"""
-    root = RfcTextFormat().sections(rfc_with_ff)
-    sec1 = root.children[0]
-    assert "First part" in sec1.paragraphs[0]
-    assert "Second part" in sec1.paragraphs[1]
-
-
-def test_rfc_running_header_after_page_break_is_stripped():
-    """The running header — the line after a form feed — is furniture, not prose.
-
-    Real RFC layout: a footer, then the form feed on its own line, then the running
-    header ("RFC N   Title   Date"), then the page's content. The footer rule cannot
-    catch the header (it has no [Page N] marker), so it is removed keyed on the form
-    feed it follows.
+    Re-homed from the RFC-text reader, which is gone. The rule was never about
+    RFCs: a numbered heading anywhere gets the short, stable half of its label,
+    because the prose half is what an editor rewrites.
     """
-    rfc = (
-        "Request for Comments: 8888\n"
-        "\n"
-        "1.  Introduction\n"
-        "\n"
-        "   First part of the intro.\n"
-        "Doe                       Standards Track                    [Page 1]\n"
-        "\f\n"
-        "RFC 8888              A Sample Protocol            January 2026\n"
-        "\n"
-        "   Second part of the intro.\n"
-    )
-    text = RfcTextFormat().sections(rfc).children[0].all_text()
-    assert "First part" in text
-    assert "Second part" in text
-    assert "A Sample Protocol" not in text  # the running header is gone
+    doc = ("# 1. Introduction\nIntro text.\n\n"
+           "# 2. High-level overview\n"
+           "This is a high-level overview of the protocol.\n\n"
+           "## 2.1 Details\nDetail text.\n")
+    root = MarkdownFormat().sections(doc)
 
-
-def test_rfc_hyphenated_token_across_a_wrap_is_rejoined():
-    """A token the 72-column wrap splits at a hyphen is quotable whole.
-
-    RFC text hyphenates only at hyphens already in the token, and the continuation is
-    indented to the paragraph, so `ISO-\\n   8859-1` must read as `ISO-8859-1`, not the
-    `ISO- 8859-1` that plain whitespace-collapsing would leave.
-    """
-    rfc = (
-        "Request for Comments: 8888\n"
-        "\n"
-        "1.  Introduction\n"
-        "\n"
-        "   The value is encoded with the ISO-\n"
-        "   8859-1 character set as described below.\n"
-    )
-    norm = normalize_ws(RfcTextFormat().sections(rfc).children[0].all_text())
-    assert "ISO-8859-1" in norm
-    assert "ISO- 8859-1" not in norm
-
-
-def test_rfc_double_hyphen_line_end_is_not_rejoined():
-    """A line ending in '--' (an em-dash) is left alone — only a single hyphen joins."""
-    rfc = (
-        "Request for Comments: 8888\n"
-        "\n"
-        "1.  Introduction\n"
-        "\n"
-        "   The request target --\n"
-        "   regardless of its form -- is normalised.\n"
-    )
-    norm = normalize_ws(RfcTextFormat().sections(rfc).children[0].all_text())
-    assert "-- regardless" in norm
-    assert "--regardless" not in norm
-
-
-def test_rfc_appendix_is_addressable_by_letter():
-    """`§ A` resolves to an appendix, and a plain heading is not mistaken for one.
-
-    The appendix node is built as `A. Pseudocode`; matching a `§` selector compares the
-    title's leading designator, which now admits an appendix letter. (`§ A.1` for an
-    appendix *subsection* needs the bare-`A.1.` heading to be recognised — that is a
-    separate change.)
-    """
-    rfc = (
-        "Request for Comments: 8888\n"
-        "\n"
-        "1.  Introduction\n"
-        "\n"
-        "   Intro text.\n"
-        "\n"
-        "Appendix A.  Pseudocode\n"
-        "\n"
-        "   The decoding routine is given here.\n"
-    )
-    fmt = RfcTextFormat()
-    assert "decoding routine" in fmt.extract(rfc, "§ A")
-    # The appendix now carries a § label, so it can be offered as a candidate.
-    labels = section_labels(fmt.sections(rfc))
-    assert "§ A" in labels
-    # A plain-word heading must never be read as a one-letter designator.
-    assert "§ I" not in labels and "§ P" not in labels
-
-
-def test_rfc_indented_old_style_heading_resolves():
-    """Pre-1990s RFCs indent headings and drop the period ('   2.1  Host Names').
-
-    The dotted, indented form is admitted as a fallback, so `§ 2.1` resolves where the
-    column-0 matcher would have found nothing.
-    """
-    rfc1123 = (
-        "Network Working Group\n"
-        "Request for Comments: 1123\n"
-        "\n"
-        "1.  INTRODUCTION\n"
-        "\n"
-        "   This document covers host requirements.\n"
-        "\n"
-        "   2.1  Host Names and Numbers\n"
-        "\n"
-        "   The syntax of a legal Internet host name was specified in RFC-952.\n"
-        "\n"
-        "   2.2  Using Domain Name Service\n"
-        "\n"
-        "   Host domain names MUST be translated into IP addresses using the DNS.\n"
-    )
-    fmt = RfcTextFormat()
-    assert "legal Internet host name" in fmt.extract(rfc1123, "§ 2.1")
-    assert "translated into IP addresses" in fmt.extract(rfc1123, "§ 2.2")
-
-
-def test_rfc_indented_numbered_list_is_not_promoted_to_a_heading():
-    """An indented *single*-number line is a list item, not a section — only a dotted
-    number is admitted, which is what tells a subsection from a step list."""
-    rfc = (
-        "Request for Comments: 8888\n"
-        "\n"
-        "1.  Introduction\n"
-        "\n"
-        "   The procedure has three steps:\n"
-        "\n"
-        "   1.  Open the connection.\n"
-        "\n"
-        "   2.  Send the request.\n"
-    )
-    labels = section_labels(RfcTextFormat().sections(rfc))
-    assert labels == ["§ 1"]  # the list items 1./2. did not become sections
-
-
-def test_rfc_indented_fallback_is_off_when_subsections_are_at_column_0():
-    """A modern RFC numbers its subsections at column 0, and there the indented fallback
-    stays off — an indented dotted line (an example, an ABNF rule) is never a section.
-    The tell is a column-0 *dotted* heading, not the mere presence of column-0 ones."""
-    rfc = (
-        "Request for Comments: 8888\n"
-        "\n"
-        "1.  Introduction\n"
-        "\n   Intro.\n\n"
-        "2.  Overview\n"
-        "\n   Overview.\n\n"
-        "2.1.  Scope\n"                       # a column-0 subsection: this doc is modern
-        "\n   A real subsection at the margin.\n\n"
-        "3.  Details\n"
-        "\n   An example follows:\n\n"
-        "   3.1  the-rule = something   ; an indented example, not a heading\n"
-    )
-    labels = section_labels(RfcTextFormat().sections(rfc))
-    assert "§ 2.1" in labels       # the column-0 subsection is real
-    assert "§ 3.1" not in labels   # the indented example is left alone
-
-
-def test_rfc_mixed_style_indented_subsections_resolve():
-    """RFC 1123's shape: several top-level headings at column 0, every subsection
-    indented. The *count* of column-0 headings must not switch the fallback off — the
-    absence of column-0 *dotted* headings is what marks the old style, and an earlier
-    count-based gate misjudged exactly this document."""
-    rfc = (
-        "Request for Comments: 1123\n"
-        "\n"
-        "1.  INTRODUCTION\n\n   Requirements for Internet hosts.\n\n"
-        "2.  GENERAL ISSUES\n\n"
-        "   2.1  Host Names and Numbers\n\n"
-        "   The restriction on the first character is relaxed to allow a digit.\n\n"
-        "3.  REMOTE LOGIN\n\n"
-        "   3.1  TELNET End-of-Line Convention\n\n"
-        "   The end-of-line sequence is the two-character CR LF.\n"
-    )
-    fmt = RfcTextFormat()
-    assert "first character is relaxed" in fmt.extract(rfc, "§ 2.1")
-    assert "two-character CR LF" in fmt.extract(rfc, "§ 3.1")
-
-
-def test_rfc_bare_appendix_subsection_resolves():
-    """RFC 9000 writes the appendix parent as 'Appendix A.  Pseudocode' but the child
-    as a bare 'A.1.  Sample ...' — recognised once its parent has been seen, so `§ A.1`
-    resolves (completing the pairing begun by the appendix-letter designator)."""
-    rfc9000 = (
-        "Request for Comments: 9000\n"
-        "\n"
-        "1.  Overview\n"
-        "\n"
-        "   QUIC is a transport protocol.\n"
-        "\n"
-        "Appendix A.  Pseudocode\n"
-        "\n"
-        "   The pseudocode below is non-normative.\n"
-        "\n"
-        "A.1.  Sample Variable-Length Integer Decoding\n"
-        "\n"
-        "   The following shows a sample decoding of a variable-length integer.\n"
-    )
-    fmt = RfcTextFormat()
-    assert "non-normative" in fmt.extract(rfc9000, "§ A")
-    assert "sample decoding" in fmt.extract(rfc9000, "§ A.1")
-
-
-def test_rfc_generate_section_selector():
-    """Generated selectors use § with just the number prefix."""
-    root = RfcTextFormat().sections(_RFC_SAMPLE)
-    sel = generate_selector(root, "High-level overview")
+    sel = generate_selector(root, "a high-level overview of the protocol")
     assert sel is not None
     assert sel.startswith("§ 2")
-    # Should not include the full title text after the number
-    assert "Overview" not in sel
+    assert "overview" not in sel.lower()
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -1310,25 +992,31 @@ def test_a_section_number_is_a_number_not_a_string_prefix():
 
 
 def test_a_real_rfc_section_that_does_not_exist_says_so():
-    """RFC 2616 jumps from § 13 to § 13.1.1 — there is no § 13.1 heading.
+    """The same claim as above, on a document nobody wrote for this test.
 
-    `§ 13.1` silently returned § 13.1.1, so a genuine quote from § 13.1.4 was
-    reported *absent from a document that contains it*, and a `§ 13.1` citation
-    was verified against § 13.1.1's text. Both directions of the lie, from one
-    line of code.
+    Section matching compared `node.title.startswith(part.value)`, so `§ 2` in a
+    document whose sections run to 20 could return § 20's text, and a designator
+    naming nothing at all still *found* something — which meant strict mode never
+    fired and nothing was ever reported.
+
+    RFC 8288 has seven numbered sections and three appendices. `§ 8` names none
+    of them, and neither does `§ 2.3`, while `§ 2.2` on either side of it is
+    real.
     """
     from pathlib import Path
-    body = (Path(__file__).parent / "fixtures" / "rfc2616.txt").read_text(
-        encoding="utf-8")
+
+    from apysource.repos.rfc import render
+    body = render((Path(__file__).parent / "fixtures" / "rfc8288.html")
+                  .read_text(encoding="utf-8"))
     fmt = detect_format(body)
 
-    with pytest.raises(SectionNotFound):
-        extract_section(body, "§ 13.1", fmt, strict=True)
+    for absent in ("§ 8", "§ 2.3", "§ 3.4.3"):
+        with pytest.raises(SectionNotFound):
+            extract_section(body, absent, fmt, strict=True)
 
-    # The sections either side of the gap are real, and must still resolve.
-    assert extract_section(body, "§ 13.1.1", fmt, strict=True)
-    assert "Many user agents make it possible" in \
-        extract_section(body, "§ 13.1.4", fmt, strict=True)
+    assert "Link relation types can also be used" in \
+        extract_section(body, "§ 2.1", fmt, strict=True)
+    assert extract_section(body, "§ 3.4.2", fmt, strict=True)
 
 
 def test_add_never_writes_a_section_selector_check_would_misread():

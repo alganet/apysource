@@ -181,25 +181,6 @@ def _is_furniture(el: Any) -> bool:
     return str(el.get("id") or "").startswith("page-")
 
 
-def _document_title(out: Any, blocks: list[str]) -> str:
-    """What the document calls itself.
-
-    The legacy rendition has no ``<title>`` at all — the file begins at ``<pre>``
-    — and without one the generic rule falls back to the first heading, which
-    labels every RFC in existence ``1. Introduction``.
-
-    Both publishers draw the document's own title as a top-level heading with no
-    section anchor on it, every section heading having one. That absence is the
-    signal, and it is a cheaper and more direct answer than reading the front
-    matter. The front-matter scan below is the fallback for a rendition that
-    draws no title heading at all.
-    """
-    for heading in out.find_all("h1"):
-        if not heading.get("id"):
-            return _collapse(heading.get_text())
-    return _front_matter_title(blocks)
-
-
 def _front_matter_title(blocks: list[str]) -> str:
     """The title from the header block above ``Abstract``.
 
@@ -236,6 +217,10 @@ def promote(root: Any, out: Any) -> Any:
     body = out.body
     blocks: list[list[Any]] = [[]]
     plain: list[str] = []
+    #: The document's title, once the first masthead heading has supplied it.
+    titled: list[str] = []
+    #: Whether a heading carrying a section anchor has been emitted yet.
+    anchored: list[str] = []
 
     def add_text(text: str) -> None:
         text = _WRAPPED_HYPHEN.sub("-", _PAGE_FOOTER.sub("", text))
@@ -279,8 +264,28 @@ def promote(root: Any, out: Any) -> Any:
                 blocks[-1].append(child)
                 continue
             flush()
-            heading = out.new_tag(f"h{level}")
             anchor = _heading_id(child)
+
+            # The masthead: the headings before the first anchored one, which is
+            # the document's title and — on datatracker — the draft's name under
+            # it. Neither is a section, and neither carries a section anchor,
+            # which is what tells them apart from every heading that follows.
+            #
+            # Emitting them would wrap every real section in a level the document
+            # does not have. The tree would gain a root the text rendition never
+            # had, and the Abstract — which repeats the Introduction's first
+            # sentence nearly word for word in most RFCs — would sit beside § 1
+            # rather than under it, so `locate` would name one section for a
+            # passage that lives in the other. The first of them is a title, so
+            # it is used as one.
+            if anchor is None and not anchored:
+                if not titled:
+                    titled.append(_collapse(child.get_text()))
+                continue
+            if anchor:
+                anchored.append(anchor)
+
+            heading = out.new_tag(f"h{level}")
             if anchor:
                 heading["id"] = anchor
             heading.string = _collapse(child.get_text())
@@ -288,7 +293,7 @@ def promote(root: Any, out: Any) -> Any:
 
     flush()
 
-    title = _document_title(out, plain)
+    title = titled[0] if titled else _front_matter_title(plain)
     if title and out.find("title") is None:
         head = out.new_tag("head")
         tag = out.new_tag("title")

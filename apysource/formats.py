@@ -84,7 +84,6 @@ MIME_ALIASES: dict[str, str] = {
     "html": "text/html",
     "markdown": "text/markdown",
     "wikitext": "text/x-wikitext",
-    "rfc": "text/plain",
     "plain-text": "text/plain",
 }
 
@@ -253,7 +252,8 @@ class SoupCache(Protocol):
 
 #: An HTML tag a document can *open* with, after the WHATWG mime-sniffing
 #: standard's table for identifying an unknown type as HTML — plus ``pre``,
-#: because rfc-editor's htmlized renditions begin with one. The terminator
+#: which is an opening HTML tag like any other and is how rfc-editor's older
+#: renditions begin. The terminator
 #: matters: ``<h1`` is HTML where ``<https://…>``, a Markdown autolink, is not,
 #: and the character after the name is what tells them apart. A comment is
 #: deliberately not in the set: Markdown and wikitext open with ``<!-- … -->``
@@ -271,19 +271,20 @@ _LEADING_COMMENTS = re.compile(r"^(?:<!--.*?-->\s*)+", re.DOTALL)
 def looks_like_html(body: str) -> bool:
     """Does this document open like HTML?
 
-    A free function because three other formats ask it before claiming a body —
-    Markdown, Wikitext and RFC text all reject HTML first. Each of them used to
-    construct a throwaway ``HtmlFormat()`` to ask, once per detection, on a path
-    that runs for every extraction. A format instance is not what the question
-    needs, and building one per call quietly ties the answer to whatever state
-    the class may grow later.
+    A free function because the other formats ask it before claiming a body —
+    Markdown and Wikitext both reject HTML first. Each of them used to construct
+    a throwaway ``HtmlFormat()`` to ask, once per detection, on a path that runs
+    for every extraction. A format instance is not what the question needs, and
+    building one per call quietly ties the answer to whatever state the class may
+    grow later.
 
-    A body whose first non-whitespace characters are an opening HTML tag is
-    HTML even when nothing declares it: rfc-editor's htmlized renditions start
-    at ``<pre>`` with no doctype, head or body anywhere in the file. Read as
-    text, their markup stays in the text — every ``[<a href=…>RFC5646</a>]``
-    reference then splits the sentence it sits in, which surfaced as citations
-    unfindable past a bracketed reference.
+    A body whose first non-whitespace characters are an opening HTML tag is HTML
+    even when nothing declares it. rfc-editor is where that was found — its older
+    renditions start at ``<pre>`` with no doctype, head or body anywhere in the
+    file — but it is not why it holds, and the case still guards every host
+    serving that shape that no repo claims: a mirror, an ietf.org draft, a file
+    on disk. Read as text, such a document's markup stays in the text, and every
+    ``[<a href=…>RFC5646</a>]`` reference splits the sentence it sits in.
     """
     head = body[:1000].lstrip().lower()
     if head[:9].startswith("<!doctype") or head[:5].startswith("<html"):
@@ -678,211 +679,6 @@ class WikitextFormat:
         return locate_section(body, snippet, self)
 
 
-class RfcTextFormat:
-    """IETF RFC plain-text format — dotted-number sections for extraction and location."""
-
-    name = "rfc"
-    mime_type = "text/plain"
-
-    # Section heading: "1.  Title", "2.1.  Title", or "1 Title", "2.1 Title"
-    _SECTION_RE = re.compile(
-        r"^(\d+(?:\.\d+)*)\.?\s+(\S.*)$", re.MULTILINE)
-    # Appendix heading: "Appendix A.  Title" or "Appendix A Title"
-    _APPENDIX_RE = re.compile(
-        r"^Appendix\s+([A-Z](?:\.\d+)*)\.?\s+(\S.*)$", re.MULTILINE)
-    # Old-style indented heading ("   2.1  Host Names and Numbers"), as pre-1990s RFCs
-    # write them. Admitted only as a guarded fallback (see `sections`): a *dotted*
-    # number only, because a bare "1"/"2" at an indent is a numbered list item far more
-    # often than a heading — the dot is what tells a subsection from a list.
-    _INDENTED_SECTION_RE = re.compile(r"^[ \t]+(\d+(?:\.\d+)+)\.?[ \t]+(\S.*)$")
-    # A bare appendix subsection ("A.1.  Sample Decoding"), which carries no "Appendix"
-    # prefix. Recognised only once its "Appendix A" parent has been seen, so an "A.1."
-    # elsewhere cannot invent a section.
-    _APPENDIX_CHILD_RE = re.compile(r"^([A-Z](?:\.\d+)+)\.?[ \t]+(\S.*)$")
-
-    def detect(self, body: str) -> bool:
-        """Detect IETF RFC plain text by header markers and section numbering."""
-        # Reject HTML
-        if looks_like_html(body):
-            return False
-        head = body[:3000]
-        signals = 0
-        # RFC header markers
-        if re.search(r"Request for Comments:\s*\d+", head):
-            signals += 2
-        elif re.search(r"RFC\s+\d{3,5}", head):
-            signals += 1
-        if re.search(r"Internet.Draft", head, re.IGNORECASE):
-            signals += 1
-        # Form feed characters
-        if "\f" in body[:10000]:
-            signals += 1
-        # Dotted-number section headings (at least 2)
-        sections = self._SECTION_RE.findall(body[:5000])
-        if len(sections) >= 2:
-            signals += 1
-        # RFC-specific boilerplate sections
-        if re.search(r"^Status of This Memo", head, re.MULTILINE):
-            signals += 1
-        return signals >= 2
-
-    def _clean_body(self, body: str) -> str:
-        r"""Strip RFC pagination furniture and repair tokens broken across a wrap.
-
-        Four steps, in order:
-
-        * The running **header** (``RFC 9110  Semantics  June 2022``) is the line right
-          after a page break, so it is removed keyed on the form feed it follows. Keying
-          on the ``\f`` is what keeps this from touching a line of body prose that merely
-          looks like a header — the same discipline the footer rule below cannot use,
-          because a footer's ``[Page N]`` marker is unambiguous on its own.
-        * Any stray form feed left over — a document may end on one with no line after it.
-        * The page **footer** (``Author  ...  [Page N]``), which sits *before* the break.
-        * A word split across the 72-column wrap **at a single hyphen** is rejoined
-          without a space. RFC text hyphenates only at hyphens already in the token — a
-          field name, an ABNF rule name, a charset like ``ISO-8859-1`` — so a wrap of
-          ``ISO-\n   8859-1`` otherwise reads as ``ISO- 8859-1`` and the token cannot be
-          quoted whole. The continuation is indented to the paragraph, so the newline and
-          that indent are both consumed, leaving ``ISO-8859-1``. Only a *single* hyphen
-          between two alphanumerics is joined, which leaves a line ending ``--`` (an
-          em-dash) alone; and because every heading is preceded by a blank line, no
-          heading is ever pulled up onto a hyphen above it.
-        """
-        # Running header: the line immediately after a form feed (removes both).
-        text = re.sub(r"\f\n[^\n]*\n", "\n", body)
-        # Any remaining form feed with no line of its own to carry a header.
-        text = text.replace("\f", "")
-        # Page footer, which is not adjacent to the break.
-        text = re.sub(r"^.*\[Page \d+\]\s*$", "", text, flags=re.MULTILINE)
-        # Rejoin a token split at a single hyphen across a wrap (never "--"). The
-        # continuation is indented to its paragraph, so consume that indent too.
-        text = re.sub(r"(?<=[A-Za-z0-9])-\n[ \t]*(?=[A-Za-z0-9])", "-", text)
-        return text
-
-    def text(self, body: str) -> str:
-        """The RFC's prose, with the pagination furniture taken out.
-
-        ``sections`` already read the document this way; whole-document
-        extraction did not, so a sentence that happened to straddle a page break
-        had `[Page 42]` and a form feed sitting in the middle of it and could
-        not be quoted at all. The footers are not part of what the RFC says.
-        """
-        return self._clean_body(body)
-
-    def title(self, body: str) -> str:
-        """The RFC's own title, from its header block.
-
-        An RFC prints its title centred between the author column and the
-        ``Abstract``/``Status of this Memo`` that follows it — so it is the run
-        of lines immediately before that heading. Falling back to the first
-        *section* heading, as the generic rule does, labelled every RFC in
-        existence `1. Introduction`.
-        """
-        head = self._clean_body(body).split("\n")[:60]
-        for i, line in enumerate(head):
-            if re.match(r"^(Abstract|Status of [Tt]his Memo)\b", line):
-                title: list[str] = []
-                for prev in reversed(head[:i]):
-                    if not prev.strip():
-                        if title:
-                            break
-                        continue
-                    title.insert(0, prev.strip())
-                return _normalize(" ".join(title))
-        return ""
-
-    def sections(self, body: str):
-        """Build a SectionNode tree from RFC dotted-number headings."""
-        from apysource.sections import SectionNode
-
-        text = self._clean_body(body)
-        root = SectionNode(title="", level=0)
-        stack: list[tuple[int, SectionNode]] = [(0, root)]
-
-        current_paragraphs: list[str] = []
-        current_block: list[str] = []
-
-        # The indented-heading fallback runs only for a document whose subsections are
-        # not already at column 0. A modern RFC numbers its subsections there (8.1,
-        # 10.4.18), so an indented dotted line is an example or an ABNF rule, never a
-        # heading; an old-style RFC (RFC 1123 and its generation) keeps its top-level
-        # headings at column 0 but indents every subsection, so it has *no* column-0
-        # dotted heading at all. The presence of a column-0 *dotted* heading — not the
-        # count of column-0 headings, which misjudged the mixed RFC 1123 shape — is what
-        # says "subsections live at the margin here, leave the indented ones alone".
-        indented_ok = not any(
-            "." in m.group(1) for m in self._SECTION_RE.finditer(text))
-        # Appendix letters seen via "Appendix X", so a bare "X.1" child can be resolved.
-        appendix_letters: set[str] = set()
-        # Whether the previous line was blank — a heading is set off by one, a list item
-        # usually is not, which is the extra guard the indented fallback leans on.
-        prev_blank = True
-
-        def _flush_block():
-            t = _normalize("\n".join(current_block))
-            if t:
-                current_paragraphs.append(t)
-            current_block.clear()
-
-        for line in text.split("\n"):
-            # Column-0 numbered heading, then a full "Appendix X" heading.
-            m = self._SECTION_RE.match(line)
-            is_appendix = False
-            if m is None:
-                m = self._APPENDIX_RE.match(line)
-                is_appendix = m is not None
-            # A bare appendix subsection ("A.1  Title"), only under a seen "Appendix A".
-            if m is None and appendix_letters:
-                cm = self._APPENDIX_CHILD_RE.match(line)
-                if cm is not None and cm.group(1)[0] in appendix_letters:
-                    m = cm
-            # Old-style indented heading, only when the document invites it and the line
-            # is set off by a blank above.
-            if m is None and indented_ok and prev_blank:
-                m = self._INDENTED_SECTION_RE.match(line)
-            if m:
-                _flush_block()
-                target = stack[-1][1] if stack else root
-                target.paragraphs.extend(current_paragraphs)
-                current_paragraphs = []
-
-                num = m.group(1)
-                title = f"{num}. {m.group(2).strip()}"
-                level = num.count(".") + 1
-                node = SectionNode(title=title, level=level)
-
-                while stack and stack[-1][0] >= level:
-                    stack.pop()
-                parent = stack[-1][1] if stack else root
-                parent.children.append(node)
-                stack.append((level, node))
-                if is_appendix:
-                    appendix_letters.add(num)
-                prev_blank = False
-            elif line.strip() == "":
-                _flush_block()
-                prev_blank = True
-            else:
-                current_block.append(line)
-                prev_blank = False
-
-        _flush_block()
-        target = stack[-1][1] if stack else root
-        target.paragraphs.extend(current_paragraphs)
-
-        return root
-
-    def extract(self, body: str, locator: str) -> str:
-        """Extract content using a sourceSection selector."""
-        from apysource.sections import extract_section
-        return extract_section(body, locator, self)
-
-    def locate(self, body: str, snippet: str) -> LocateResult | None:
-        """Locate a snippet and produce a sourceSection selector."""
-        from apysource.sections import locate_section
-        return locate_section(body, snippet, self)
-
-
 class PlainTextFormat:
     """Plain-text content format — line ranges for extraction and location."""
 
@@ -974,7 +770,7 @@ def default_formats(soup_cache: SoupCache | None = None) -> list[ContentFormat]:
     """
     return [
         HtmlFormat(soup_cache=soup_cache), MarkdownFormat(), WikitextFormat(),
-        RfcTextFormat(), PlainTextFormat(),
+        PlainTextFormat(),
     ]
 
 
@@ -986,13 +782,17 @@ def _find_format(name: str, formats: list[ContentFormat]) -> ContentFormat | Non
     for fmt in formats:
         if fmt.name == name:
             return fmt
-    # Match on MIME type — only if exactly one format has that MIME
+    # Match on MIME type — only if exactly one format has that MIME.
     resolved = MIME_ALIASES.get(name, name)
     mime_matches = [fmt for fmt in formats if fmt.mime_type == resolved]
     if len(mime_matches) == 1:
         return mime_matches[0]
-    # Ambiguous MIME (e.g. text/plain matches both rfc and plain-text) —
-    # return None so the caller falls through to detect_format()
+    # No shipped list is ambiguous any more: `text/plain` used to name both the
+    # RFC reader and the plain-text one, so a source that said exactly what it
+    # was fell through to sniffing its own body. The guard stays because
+    # `default_formats` is a seam a caller can pass their own list through, and
+    # picking whichever of two claimants happened to come first is not an answer
+    # — falling through to detection at least looks at the document.
     return None
 
 
@@ -1047,7 +847,7 @@ def extract_content(body: str, locator: str | None,
         found = _find_format(format_name, formats)
         if found:
             text = found.extract(body, locator)
-            # Markdown/wikitext/RFC route their own extract() through the
+            # Markdown and wikitext route their own extract() through the
             # section machinery, so a section miss can arrive by this door too.
             if strict and not text:
                 _explain_empty(body, locator, found)

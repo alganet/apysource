@@ -16,11 +16,6 @@ SPDX-FileCopyrightText = "United Nations"
 SPDX-License-Identifier = "LicenseRef-PublicDomain"
 
 [[annotations]]
-path = "tests/fixtures/rfc2616.txt"
-SPDX-FileCopyrightText = "1999 The Internet Society"
-SPDX-License-Identifier = "LicenseRef-IETF"
-
-[[annotations]]
 path = "tests/fixtures/rfc8288.html"
 SPDX-FileCopyrightText = "2017 IETF Trust and the persons identified as the document authors"
 SPDX-License-Identifier = "LicenseRef-IETF"

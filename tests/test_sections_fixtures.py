@@ -6,9 +6,13 @@
 
 Tests use real documents stored in tests/fixtures/:
 - un_charter.html  — UN Charter full text (HTML)
-- rfc2616.txt      — HTTP/1.1 specification (IETF RFC plain text)
+- rfc8288.html     — Web Linking (rfc-editor's legacy htmlization)
 - markdown_syntax.md — Markdown syntax reference (Markdown)
 - http.wiki         — Wikipedia HTTP article (Wikitext)
+
+The RFC arrives through ``RfcRepo.render``, because that is the only form of it
+any format ever sees. Reading the rendition raw here would be testing a document
+apysource does not read.
 """
 
 from pathlib import Path
@@ -18,12 +22,12 @@ import pytest
 from apysource.formats import (
     HtmlFormat,
     MarkdownFormat,
-    RfcTextFormat,
     WikitextFormat,
     detect_format,
     extract_content,
     normalize_ws,
 )
+from apysource.repos.rfc import render
 from apysource.sections import (
     SectionNotFound,
     extract_by_selector,
@@ -41,9 +45,19 @@ def un_charter():
     return (FIXTURES / "un_charter.html").read_text(encoding="utf-8")
 
 
+#: Renditions their publisher's repo normalizes before any format sees them.
+RENDITIONS = {"rfc8288.html"}
+
+
+def fixture_body(name):
+    """A fixture as apysource would actually have it in hand."""
+    raw = (FIXTURES / name).read_text(encoding="utf-8", errors="replace")
+    return render(raw) if name in RENDITIONS else raw
+
+
 @pytest.fixture
-def rfc2616():
-    return (FIXTURES / "rfc2616.txt").read_text(encoding="utf-8")
+def rfc8288():
+    return fixture_body("rfc8288.html")
 
 
 @pytest.fixture
@@ -64,8 +78,16 @@ def test_detect_un_charter(un_charter):
     assert detect_format(un_charter).name == "html"
 
 
-def test_detect_rfc2616(rfc2616):
-    assert detect_format(rfc2616).name == "rfc"
+def test_detect_rfc8288(rfc8288):
+    """A normalized RFC is a page, and is read by the reader for pages.
+
+    There is no format that detects an RFC any more, and this is what replaces
+    the one there was: a heuristic that scored textual signals — "Request for
+    Comments:", a form feed, two dotted headings — and would claim a changelog or
+    a mailing-list archive that quoted an RFC header. Which document a repo has
+    fetched is not something to sniff for.
+    """
+    assert detect_format(rfc8288).name == "html"
 
 
 def test_detect_markdown_syntax(markdown_syntax):
@@ -153,90 +175,62 @@ def test_un_charter_chapter_roman_equiv(un_charter):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# RFC 2616 (IETF plain text)
+# RFC 8288 (rfc-editor's legacy htmlization, as RfcRepo hands it over)
 # ══════════════════════════════════════════════════════════════════════
 
-def test_rfc_section_count(rfc2616):
-    root = RfcTextFormat().sections(rfc2616)
-    assert len(root.children) == 21
+def test_rfc_deep_nesting(rfc8288):
+    """A three-deep dotted section is reachable by the number it prints."""
+    result = extract_content(rfc8288, "§ 3.4.1, paragraph 1", format_name="section")
+    assert "link-params can be translated to serialisation-defined target" in \
+        normalize_ws(result)
 
 
-def test_rfc_deep_nesting(rfc2616):
-    """Section 10.4.18 (417 Expectation Failed) is reachable via § 10.4.18."""
-    result = RfcTextFormat().extract(rfc2616, "§ 10.4.18, paragraph 1")
-    assert "expectation" in result.lower() or "Expect" in result
+def test_rfc_toc_not_parsed(rfc8288):
+    """The table of contents must not mint a section per line.
 
-
-def test_rfc_toc_not_parsed(rfc2616):
-    """Indented ToC lines don't create spurious sections."""
-    root = RfcTextFormat().sections(rfc2616)
-    # The ToC is before section 1, so it becomes root paragraphs.
-    # None of the root paragraphs should have section-like titles
-    # as children.
-    for child in root.children:
-        # All real sections start with a number
-        assert child.title[0].isdigit(), f"Unexpected section: {child.title!r}"
-
-
-def test_rfc_page_breaks_transparent(rfc2616):
-    """Content spanning form feeds is correctly assembled."""
-    root = RfcTextFormat().sections(rfc2616)
-    # Section 1.4 has content that spans page breaks in the raw file
-    sec1 = root.children[0]
-    sec14 = None
-    for c in sec1.children:
-        if "1.4" in c.title:
-            sec14 = c
-            break
-    assert sec14 is not None
-    # Should have substantial paragraphs (content spans multiple pages)
-    assert len(sec14.paragraphs) >= 10
-
-
-def test_rfc_locate_deep_section(rfc2616):
-    """Locate '408 Request Timeout' → selector references § 10.4 area."""
-    result = RfcTextFormat().locate(
-        rfc2616, "The client did not produce a request within the time")
-    assert result is not None
-    assert "§ 10.4" in result.locator
-
-
-def test_rfc_roundtrip(rfc2616):
-    """Locate snippet in section 1.4, extract back, verify."""
-    fmt = RfcTextFormat()
-    snippet = "Any party to the communication which is not acting as a tunnel"
-    result = locate_section(rfc2616, snippet, fmt)
-    assert result is not None
-    assert "§ 1.4" in result.locator
-    extracted = extract_content(rfc2616, result.locator, format_name="section")
-    assert snippet in extracted
-
-
-def test_rfc_no_trailing_dot_headings(rfc2616):
-    """RFC 2616 uses '1 Introduction' (no trailing dot) — still parsed."""
-    root = RfcTextFormat().sections(rfc2616)
-    # Section titles should be normalised with the dot
-    titles = [c.title for c in root.children]
-    intro = [t for t in titles if "Introduction" in t]
-    assert len(intro) == 1
-
-
-def test_rfc_running_header_is_not_in_extracted_text(rfc2616):
-    """'RFC 2616  HTTP/1.1  June 1999' repeats on every page and is pagination,
-    not prose — it must not survive into the extracted text."""
-    text = normalize_ws(RfcTextFormat().text(rfc2616))
-    assert "RFC 2616 HTTP/1.1 June 1999" not in text
-
-
-def test_rfc_hyphenated_token_across_wrap_is_quotable(rfc2616):
-    """A hyphenated token the 72-column wrap splits can be quoted whole.
-
-    'ISO-8859-1' appears in the raw file wrapped as 'ISO-\\n   8859-1'; whitespace
-    collapsing alone would leave the unquotable 'ISO- 8859-1'.
+    It is a page of dotted leaders and numbers, and the numbers are the same
+    ones the real headings carry — so a reader that took them would build a
+    second, empty copy of the whole document, and `§ 3.4.1` would have two
+    answers. The legacy rendition puts no heading markup in the ToC, which is
+    what keeps it out.
     """
-    text = normalize_ws(RfcTextFormat().text(rfc2616))
-    assert "ISO-8859-1" in text
-    assert "ISO- 8859-1" not in text
+    titles = [c.title for c in HtmlFormat().sections(rfc8288).children]
+
+    assert titles.count("3. Link Serialisation in HTTP Headers") == 1
+    assert len(titles) == 10, titles
+    for title in titles:
+        designator = title.split()[0].rstrip(".")
+        assert designator.isdigit() or title.startswith("Appendix"), title
+
+
+def test_rfc_page_breaks_transparent(rfc8288):
+    """A sentence broken by a page boundary has to read as one sentence.
+
+    In the rendition it is interrupted by a footer, a horizontal rule, a page
+    anchor and a running header — around 130 characters of furniture that no
+    reader ever saw and that no author would think to quote.
+    """
+    sentence = ('the serialisation(s) that they might occur within. For example, '
+                'the application "Web browsing"')
+    assert sentence in normalize_ws(HtmlFormat().text(rfc8288))
+
+
+def test_rfc_locate_deep_section(rfc8288):
+    """Locate names the section the passage is in, not the document."""
+    result = locate_section(
+        rfc8288, 'application "Web browsing" looks for the "stylesheet"',
+        HtmlFormat())
+    assert result is not None
+    assert result.locator == "§ 2"
+
+
+def test_rfc_roundtrip(rfc8288):
+    """Locate a snippet, extract by what came back, find the snippet again."""
+    snippet = 'application "Web browsing" looks for the "stylesheet" link relation'
+    result = locate_section(rfc8288, snippet, HtmlFormat())
+    assert result is not None
+    extracted = extract_content(rfc8288, result.locator, format_name="section")
+    assert snippet in normalize_ws(extracted)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -354,7 +348,7 @@ def test_wiki_fixture_deep_nesting(http_wiki):
     assert len(data_exchange.children) >= 2  # Has sub-subsections
 
 
-def test_locate_still_works_when_a_candidate_selector_misses(rfc2616):
+def test_locate_still_works_when_a_candidate_selector_misses(rfc8288):
     """The regression A2 could very easily have caused.
 
     simplify_selector *probes* with extract_by_selector and reads "" as "that
@@ -362,22 +356,22 @@ def test_locate_still_works_when_a_candidate_selector_misses(rfc2616):
     turns every probe into a crash, and locate stops working at all. Hence
     strict=False by default, and this test to keep it that way.
     """
-    snippet = "Any party to the communication which is not acting as a tunnel"
-    result = locate_section(rfc2616, snippet, RfcTextFormat())
+    snippet = 'application "Web browsing" looks for the "stylesheet" link relation'
+    result = locate_section(rfc8288, snippet, HtmlFormat())
 
     assert result is not None
-    assert "§ 1.4" in result.locator
-    assert snippet in extract_content(rfc2616, result.locator,
-                                      format_name="section")
+    assert result.locator == "§ 2"
+    assert snippet in normalize_ws(
+        extract_content(rfc8288, result.locator, format_name="section"))
 
 
-def test_a_missing_section_in_a_real_rfc_names_real_ones(rfc2616):
+def test_a_missing_section_in_a_real_rfc_names_real_ones(rfc8288):
     """Suggestions are claims about the source; they must be true of it."""
-    fmt = RfcTextFormat()
-    real = set(section_labels(fmt.sections(rfc2616)))
+    fmt = HtmlFormat()
+    real = set(section_labels(fmt.sections(rfc8288)))
 
     with pytest.raises(SectionNotFound) as caught:
-        extract_content(rfc2616, "§ 99.9", format_name="section", strict=True)
+        extract_content(rfc8288, "§ 99.9", format_name="section", strict=True)
 
     assert caught.value.candidates
     for candidate in caught.value.candidates:
@@ -393,7 +387,7 @@ def _all_sections(node):
 
 
 @pytest.mark.parametrize("fixture", [
-    "rfc2616.txt", "un_charter.html", "markdown_syntax.md",
+    "rfc8288.html", "un_charter.html", "markdown_syntax.md",
     "mdn_origin.md", "http.wiki",
 ])
 def test_locate_names_the_section_the_passage_actually_lives_in(fixture):
@@ -413,7 +407,7 @@ def test_locate_names_the_section_the_passage_actually_lives_in(fixture):
     Passages a specification repeats verbatim in two places are excluded: there
     the ambiguity is in the source, not in us, and `locate` says so on stderr.
     """
-    body = (FIXTURES / fixture).read_text(encoding="utf-8", errors="replace")
+    body = fixture_body(fixture)
     fmt = detect_format(body)
     root = fmt.sections(body)
 

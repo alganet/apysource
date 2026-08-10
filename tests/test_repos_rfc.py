@@ -189,6 +189,37 @@ def test_an_appendix_is_addressable_on_a_real_document():
     assert _section(document, "§ A.1").startswith("HTML motivated the original")
 
 
+def test_a_rendition_that_draws_no_title_heading_reads_its_front_matter():
+    """The fallback, for a rendition that marks up no title at all.
+
+    An RFC prints its title centred between the author column and the
+    `Abstract` that follows, so it is the run of lines just above that word.
+    Without this the generic rule takes the first heading and labels the
+    document `1. Introduction`, which is what `add` used to call every RFC it
+    saw. The comment is here because a page break leaves one behind, and a
+    comment is not text the document says.
+    """
+    raw = (
+        "<pre>Network Working Group                          A. Author\n"
+        "Request for Comments: 9999                     Example Org\n"
+        "\n"
+        "\n"
+        "          A Study of Nothing In Particular\n"
+        "\n"
+        "Abstract\n"
+        "\n"
+        "   This document studies nothing in particular.\n"
+        "<!--NewPage-->\n"
+        '<span class="h2"><a class="selflink" id="section-1">1</a>.  Intro</span>\n'
+        "\n"
+        "   Introductory text.\n"
+        "</pre>"
+    )
+    document = render(raw)
+    assert HtmlFormat().title(document) == "A Study of Nothing In Particular"
+    assert _section(document, "§ 1") == "Introductory text."
+
+
 def test_the_document_is_labelled_by_its_title_not_by_section_one():
     """The legacy rendition has no `<title>`: the file begins at `<pre>`.
 
@@ -263,6 +294,20 @@ def test_a_url_shaped_key_cannot_escape_the_cache_directory(tmp_path, bogus):
     assert _rfc(tmp_path).url_to_key(bogus) is None
 
 
+def test_a_loosened_url_pattern_still_cannot_name_a_path(tmp_path):
+    """`url_pattern` is a constructor argument, so it is not the last word.
+
+    The shipped pattern happens to admit nothing dangerous, which is exactly
+    what makes a guard that trusts it worthless: the wiring is a config file,
+    and the next person to widen that regex for a mirror they need is not
+    thinking about `..`.
+    """
+    repo = RfcRepo(cache_dir=tmp_path, url_pattern=r"rfc-editor\.org/rfc/(.+)$",
+                   base_url=BASE_URL)
+    assert repo.url_to_key("https://www.rfc-editor.org/rfc/../../etc/passwd") is None
+    assert repo.url_to_key("https://www.rfc-editor.org/rfc/rfc9110") == "rfc9110"
+
+
 # ── Crawling ──────────────────────────────────────────────────────────────
 
 def test_the_html_rendition_is_what_gets_fetched(tmp_path):
@@ -284,10 +329,30 @@ def test_the_cache_holds_the_rendition_it_was_served(tmp_path):
     repo = _rfc(tmp_path, MockFetcher(content=LEGACY))
     repo.crawl("rfc8288")
 
-    assert (tmp_path / "rfc8288.html").read_text(encoding="utf-8") == LEGACY
-    assert '<span class="h1">' in (tmp_path / "rfc8288.html").read_text(
-        encoding="utf-8")
-    assert "<h1" in repo.extract_content("", tmp_path / "rfc8288.html")
+    cached = (tmp_path / "rfc8288.html").read_text(encoding="utf-8")
+    assert cached == LEGACY
+    assert '<span class="h2">' in cached and "<h2" not in cached
+
+    # And what a format is handed is the normalized document, every time.
+    assert '<h2 id="section-1">' in repo.extract_content(
+        "", tmp_path / "rfc8288.html")
+
+
+def test_a_warm_cache_is_not_refetched_unless_it_is_forced(tmp_path):
+    """An RFC is immutable once published; re-reading one is a wasted request.
+
+    `--refresh` still gets through, because that is the flag whose entire job is
+    to distrust the cache.
+    """
+    fetcher = MockFetcher(content=LEGACY)
+    repo = _rfc(tmp_path, fetcher)
+
+    repo.crawl("rfc8288")
+    repo.crawl("rfc8288")
+    assert len(fetcher.calls) == 1
+
+    repo.crawl("rfc8288", force=True)
+    assert len(fetcher.calls) == 2
 
 
 def test_an_rfc_that_does_not_exist_is_not_found_not_unavailable(tmp_path):

@@ -13,6 +13,7 @@ from rdflib.namespace import DCTERMS, RDF, RDFS
 from apysource.namespaces import OA, SCHEMA, SV
 from apysource.repos import RepoRegistry
 from apysource.repos._base import BaseRepo, RepoNotFound, RepoUnavailable
+from apysource.repos.rfc import render
 from apysource.resolution import get_text, load_text, resolve_chain, resolve_direct
 from apysource.results import FetcherResult, RepoResult
 
@@ -536,14 +537,17 @@ def test_resolve_direct_routes_by_pattern_too(tmp_path):
 
 # ── A section that is not there (A2) ─────────────────────────────────
 
-RFC_BODY = (Path(__file__).parent / "fixtures" / "rfc2616.txt").read_text(
-    encoding="utf-8")
+#: A real specification, in the form apysource actually has it in hand: RfcRepo
+#: normalizes the rendition before any format is asked about it.
+RFC_BODY = render(
+    (Path(__file__).parent / "fixtures" / "rfc8288.html").read_text(
+        encoding="utf-8"))
 
 
 def _section_outcome(section):
     frag = URIRef("http://x/frag")
     g = build_chain_graph(frag, URIRef("http://x/src"),
-                          "https://rfc.test/rfc2616.txt", location="")
+                          "https://rfc.test/rfc8288.html", location="")
     target = next(g.objects(frag, OA.hasTarget))
     sel = BNode()
     g.add((target, OA.hasSelector, sel))
@@ -556,7 +560,7 @@ def _section_outcome(section):
 
 
 def test_a_real_section_still_extracts():
-    outcome = _section_outcome("§ 1.4")
+    outcome = _section_outcome("§ 1.2")
     assert outcome.status == "ok"
     assert outcome.text.strip()
 
@@ -571,7 +575,7 @@ def test_a_missing_section_is_not_an_empty_extraction():
 
 def test_a_missing_section_names_sections_that_exist():
     outcome = _section_outcome("§ 1.5")
-    assert "§ 1.4" in outcome.reason
+    assert "§ 1.2" in outcome.reason
 
 
 def test_a_section_selector_on_a_plain_document_says_so():
