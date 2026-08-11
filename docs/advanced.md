@@ -419,6 +419,70 @@ about the source.
 Neither writes anything to the cache. A page that comes back upstream verifies
 on the next run, with no `--refresh` needed.
 
+### When a document has been replaced
+
+Every other check asks whether the source still says this. One asks whether this
+is still *the source*.
+
+A citation can verify perfectly and still quote a specification its publisher
+has withdrawn: the sentence is there, in a document that was superseded three
+years ago. Many publishers record the relation — an RFC's *Obsoleted by*, a
+statute's revoking act — and many publish nothing of the kind, so a repo
+declares whether it can answer:
+
+```python
+class MyRepo(BaseRepo):
+    supports_supersession = True
+
+    def supersession(self, key):
+        # Raising RepoError here is fine: it is recorded as "unknown".
+        replaced_by = self.registry_says_this_was_replaced(key)
+        if not replaced_by:
+            return Supersession(self.NAME, key, "current")
+        return Supersession(self.NAME, key, "superseded",
+                            superseded_by=replaced_by)
+```
+
+The flag is what makes silence meaningful. A repo that leaves it `False` is
+passed over entirely and contributes no row to the report — there is no such
+thing as an obsolete dictionary entry, and a check reporting "currency unknown"
+for every page of a wiki would be noise. A repo that sets it `True` and then
+cannot reach its index reports `unknown`, which is a finding: assuming "current"
+would be the reassuring guess, and a citation into a replaced document would go
+out green for as long as the outage lasted.
+
+An empty `superseded_by` under `superseded` is a real state, not a missing
+value — a statute can be revoked with nothing put in its place.
+
+Returning **`None`** says the question does not apply to *this document*, and
+nothing is recorded. A repository usually holds several kinds of thing, and the
+relation it tracks may be defined over only some of them: `RfcRepo` answers for
+RFCs, but an Internet-Draft is related by `became_rfc` and expires, and a
+`bcp`/`std` number points into a series that is re-mapped rather than obsoleted.
+Asking an index about a document it does not cover gets you "nothing obsoletes
+this", which read as `current` is a clean bill of health nobody issued.
+`supports_supersession` draws that line for a whole repo; `None` draws it one
+document at a time.
+
+Under `--no-crawl` the lookup reads the cache and reports what is there, rather
+than going quiet: the document itself is served from disk on such a run, so this
+should not be the one thing that stays silent about something it knows. A
+cache-only miss records nothing — a question declined is not a question that
+could not be answered.
+
+The `Document supersession` check **warns** by default, because citing a
+superseded document is sometimes the only option available: the successor may
+have deleted the very thing being described. `--strict-supersession` turns it
+into a failure, for a collection that means to track only documents in force.
+
+Unlike a crawl, this is asked whether or not the cached document is stale. A
+crawl runs only when the cache is cold, and a document does not have to change
+in order to stop being the one in force — it is replaced by a *different*
+document, somewhere else. Hanging the question off the crawl would silence it on
+exactly the run where the answer has had time to become interesting. The answer
+is only as fresh as the HTTP cache it came through, so `--refresh` is what
+re-asks.
+
 ### Writing a custom repo
 
 ```python
@@ -427,6 +491,7 @@ from apysource.repos import BaseRepo, RepoNotFound
 class MyRepo(BaseRepo):
     NAME = "myrepo"
     supports_crawl = True          # opt in; without it, a cold cache falls back
+    supports_supersession = False  # opt in only if the publisher records it
 
     def url_to_key(self, url):
         m = self.url_pattern.search(url)

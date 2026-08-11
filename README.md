@@ -350,6 +350,17 @@ Fetched pages are cached on disk and reused indefinitely (no time-based expiry).
 
 Pass `--strict-redirects` to `check` to fail, rather than warn, when a source URL has moved. Note that a page cached before apysource recorded redirect destinations reports its destination as *unknown*, not as clean — `--refresh` resolves that.
 
+`Document supersession` answers a different question from every other check: not
+whether the source still says this, but whether this is still **the source**. A
+citation can verify perfectly and quote a specification its publisher withdrew
+years ago — the sentence is there, in a document no longer in force. Repos that
+can tell (`RfcRepo` asks datatracker) report it; repos whose publishers record
+nothing of the kind contribute no row at all, because there is no such thing as
+an obsolete dictionary entry. It **warns** by default, since citing a superseded
+document is often the only option — the successor may have deleted the very
+thing being described — and `--strict-supersession` fails on it instead. See
+[docs/advanced.md](docs/advanced.md#when-a-document-has-been-replaced).
+
 ### Crawling a large collection
 
 `check --workers N` fetches several documents at once, and defaults to 8. The

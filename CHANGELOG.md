@@ -12,6 +12,68 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **A repository can say whether its documents are still in force.** Every check until
+  now asked whether the source still says this. None asked whether this is still *the
+  source* — and a citation can verify perfectly while quoting a specification that was
+  withdrawn years ago. The sentence is there; the document is no longer the one that
+  governs.
+
+  `BaseRepo.supports_supersession` declares whether a repo can answer, alongside
+  `supports_crawl`. A repo that leaves it `False` is passed over entirely and produces no
+  row: there is no such thing as an obsolete dictionary entry, and reporting "currency
+  unknown" for every page of a wiki would be noise that teaches its reader to skip the
+  section. That is the whole reason it is declared rather than inferred — silence has to
+  mean "this publisher has no such notion" and never "the lookup broke". A repo that opts
+  in and then cannot reach its index reports `unknown`, loudly, because assuming
+  `current` is the reassuring guess and it is the one answer this must never give.
+
+  Repos implement `supersession(key)` and return a `Supersession`; `ensure_supersession`
+  memoizes it per run and **never raises** — an outage at the index is not the citation's
+  fault, and must not fail an extraction that had already succeeded. An empty
+  `superseded_by` under `superseded` is a real state rather than a missing value: a
+  statute can be revoked with nothing put in its place.
+
+  Returning `None` says the question does not apply to *that document*, and records
+  nothing. A repository holds several kinds of thing and the relation it tracks may cover
+  only some of them; an index asked about a document it does not index answers "nothing
+  obsoletes this", which read as `current` is a clean bill of health nobody issued.
+
+  Under `--no-crawl` the lookup reads the cache and reports what is there. The document
+  itself is served from disk on such a run, so this must not be the one thing that goes
+  quiet about something it knows. A cache-only miss records nothing: a question declined
+  is not a question that could not be answered.
+
+- **`RfcRepo` answers it from datatracker's relation API.** The data cannot come from the
+  document: an RFC's masthead carries what it *obsoletes*, frozen at publication, and
+  necessarily nothing about what obsoleted it. Verified across both htmlization
+  generations. The query is one small request per cited document, routed through
+  `self.fetch`, so it inherits the HTTP cache, the politeness delay and the
+  404-versus-outage distinction rather than restating any of them — and no sidecar file
+  is introduced. One hop only: RFC 2616 reports the six documents that replaced it, not
+  the three that replaced *those*. Following the chain would present a conclusion of ours
+  as the publisher's, and the fan-out has no natural end.
+
+  Answered for **RFCs only**, and it says so rather than guessing. `obs` is recorded
+  between RFCs, so for a draft or a `bcp`/`std` number datatracker returns
+  `total_count: 0` — which does not mean "nothing replaced this" but "the relation is not
+  defined over this". Read as `current` it is a confident wrong answer, and worst on the
+  documents most likely to need it: an Internet-Draft abandoned in 2012 was being counted
+  as a document still in force.
+
+- **A `Document supersession` check**, and `--strict-supersession` to fail on it. It
+  **warns** by default, because citing a superseded document is sometimes the only option
+  available: the successor may have deleted the very thing being described. RFC 9111
+  removed the `Warning` header field; RFC 2616 removed `Keep-Alive`. A tool that enforces
+  those has nowhere current to point.
+
+  Unlike `Repo documents`, this is **not silent on a warm cache**, and that distinction is
+  the feature rather than an implementation detail. A crawl happens only when the cache is
+  cold, and a document does not have to change in order to stop being the one in force —
+  it is replaced by a different document, somewhere else. Hung off the crawl, the check
+  would go quiet on exactly the run where the answer has had time to become interesting.
+  The answer is as fresh as the HTTP cache it came through; `--refresh` re-asks.
+
 ## [0.9.0] - 2026-08-10
 
 ### Changed
