@@ -12,6 +12,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-10
+
 ### Added
 - **A repository can say whether its documents are still in force.** Every check until
   now asked whether the source still says this. None asked whether this is still *the
