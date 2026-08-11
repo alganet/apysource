@@ -9,13 +9,16 @@ No config imports — all values received as parameters.
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 from pathlib import Path
 from typing import Any
 
 from apysource.repos.errors import RepoError, RepoNotFound, RepoUnavailable
-from apysource.results import CrawlOutcome
+from apysource.results import CrawlOutcome, Supersession
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "SMALL_FILE_THRESHOLD",
@@ -53,6 +56,25 @@ class BaseRepo:
     #: and the cost of guessing wrong is a network fetch and a changed source
     #: of truth.
     supports_crawl: bool = False
+
+    #: Whether this repo can say if one of its documents is still in force.
+    #:
+    #: Some publishers record that a document has been replaced — an RFC's
+    #: "Obsoleted by", a statute's revoking act — and some publish nothing of
+    #: the kind. A repo of the second kind must be passed over in **silence**:
+    #: it is not failing to answer, there is no answer to be had, and a report
+    #: that said "currency unknown" for every page of a wiki would be noise
+    #: that teaches its reader to skip the whole section.
+    #:
+    #: That is the entire reason this is declared rather than inferred. Silence
+    #: has to mean "this repository has no such notion" and never "the lookup
+    #: broke", because the second one is a finding. A repo that sets this True
+    #: and then cannot reach its index reports ``unknown``, loudly.
+    #:
+    #: A flag, and not ``hasattr(repo, "supersession")``, for the reason
+    #: ``supports_crawl`` gives: duck-typing turns any private helper that
+    #: happens to share the name into a claim about the publisher.
+    supports_supersession: bool = False
 
     # ── The name family, if this repo has one ─────────────────────────
     #
@@ -118,6 +140,7 @@ class BaseRepo:
         self.crawl_delay = crawl_delay
 
         self._crawls: dict[str, CrawlOutcome] = {}
+        self._supersessions: dict[str, Supersession] = {}
         #: One lock per key, created on demand behind this guard. See `_key_lock`.
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
@@ -271,6 +294,94 @@ class BaseRepo:
         read that as "nothing to say", not as a pass.
         """
         return self._crawls.get(key)
+
+    # ── Supersession interface ────────────────────────────────────────
+
+    def supersession(self, key: str, *,
+                     from_cache: bool = False) -> Supersession | None:
+        """Whether ``key`` is still the document in force. Subclasses override.
+
+        Only called on a repo that sets ``supports_supersession``. Implementations
+        answer with a :class:`Supersession`; they may also raise
+        :class:`RepoError`, which ``ensure_supersession`` records as ``unknown``.
+
+        Returning ``None`` says the question **does not apply to this document**,
+        and nothing is recorded. That is not the same as ``current``, and the
+        difference is not pedantic: a repository usually covers several kinds of
+        thing, and the relation it tracks may be defined for only some of them.
+        An index that answers "nothing obsoletes this" for a document it never
+        indexes at all would otherwise be read as a clean bill of health.
+        ``supports_supersession`` makes that distinction for a whole repo; this
+        makes it one document at a time.
+
+        ``from_cache`` means answer from what is already on disk or not at all —
+        the caller has forbidden the network. Pass it through to ``fetch``.
+        """
+        raise NotImplementedError
+
+    def ensure_supersession(self, key: str, *, force: bool = False,
+                            from_cache: bool = False) -> None:
+        """Ask once per run whether ``key`` has been replaced, and remember.
+
+        Deliberately **not** folded into ``ensure``, and the distinction is the
+        whole point of the feature. A crawl happens only when the cache is cold,
+        so anything hung off it goes quiet on a warm run — which is precisely
+        the run where this matters. A document is cached while it is current and
+        replaced six months later; nothing about the bytes on disk changes, and
+        an implementation that only spoke up on a crawl would stay silent for as
+        long as the answer was interesting.
+
+        Never raises. A repository that cannot be reached leaves the question
+        open, and an open question is a thing to report, not a reason to fail an
+        extraction that would otherwise have succeeded — the citation is not at
+        fault for an outage at the index.
+        """
+        if not self.supports_supersession:
+            return
+
+        with self._key_lock(key):
+            if not force and key in self._supersessions:
+                return
+            try:
+                outcome = self.supersession(key, from_cache=from_cache)
+            except Exception as e:  # noqa: BLE001
+                if from_cache:
+                    # Cache-only was asked for and the answer is not on disk.
+                    # That is a question *declined*, not one that could not be
+                    # answered: recording `unknown` would report a failure to
+                    # do the very thing the caller forbade. Left unrecorded, it
+                    # produces no row, which is what "we did not ask" looks
+                    # like everywhere else here.
+                    return
+                # `reason` is the raw why; the Supersession already carries the
+                # repo and the key that `message` would repeat. Fall back to it
+                # anyway, because a reason is optional and an empty one would
+                # report an unknown with nothing said about it.
+                if isinstance(e, RepoError):
+                    reason = e.reason or e.message
+                else:
+                    # Not an outage — a repo whose own lookup is broken. It
+                    # still must not fail the run, but it should leave a trace
+                    # somewhere other than the one line of a warning, or a
+                    # signature mistake reads as "the index was flaky today".
+                    logger.warning("%s: supersession lookup for %r raised %s",
+                                   self.NAME, key, e.__class__.__name__,
+                                   exc_info=True)
+                    reason = str(e)
+                outcome = Supersession(self.NAME, key, "unknown", reason=reason)
+            if outcome is None:  # the question does not apply to this document
+                return
+            self._supersessions[key] = outcome
+
+    def supersession_outcome(self, key: str) -> Supersession | None:
+        """What this repo said about ``key``'s currency, or None if never asked.
+
+        Unlike ``crawl_outcome``, ``None`` here does not mean "the cache was
+        warm". It means the question was never put — the repo does not support
+        it, or crawling was off — and the report should say nothing at all
+        rather than invent a verdict.
+        """
+        return self._supersessions.get(key)
 
 
 SMALL_FILE_THRESHOLD = 5000

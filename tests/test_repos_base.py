@@ -14,6 +14,7 @@ from apysource.repos._base import (
     extract_content_with_fallback,
     slugify,
 )
+from apysource.results import Supersession
 
 
 class _ScriptedRepo(BaseRepo):
@@ -122,6 +123,151 @@ def test_a_key_never_crawled_has_no_outcome(tmp_path):
     so much as looked at.
     """
     assert _ScriptedRepo(tmp_path).crawl_outcome("doc") is None
+
+
+# ── The supersession contract ────────────────────────────────────────────
+
+class _CurrencyRepo(_ScriptedRepo):
+    """A repo that tracks whether its documents are still in force."""
+
+    supports_supersession = True
+
+    def __init__(self, tmp_path, answer=None, raises=None, **kw):
+        super().__init__(tmp_path, **kw)
+        self.answer = answer
+        self.asks: list[str] = []
+        self.from_cache_asks: list[bool] = []
+        self.supersession_raises = raises
+
+    def supersession(self, key, *, from_cache=False):
+        self.asks.append(key)
+        self.from_cache_asks.append(from_cache)
+        if self.supersession_raises is not None:
+            raise self.supersession_raises
+        return self.answer or Supersession(self.NAME, key, "current")
+
+
+def test_a_repo_does_not_track_supersession_by_default(tmp_path):
+    """Most publishers say nothing about it, and silence must stay available.
+
+    A repo of a wiki is not failing to answer — there is no answer to be had,
+    and a report claiming otherwise for every page would be noise.
+    """
+    repo = BaseRepo(cache_dir=tmp_path, url_pattern="x", base_url="https://x")
+    assert repo.supports_supersession is False
+    with pytest.raises(NotImplementedError):
+        repo.supersession("anything")
+
+
+def test_a_repo_that_does_not_track_it_is_never_asked(tmp_path):
+    """`ensure_supersession` on an ordinary repo is a no-op, not a crash.
+
+    Every repo-backed document goes through this call, so a repo that never
+    opted in has to pass through it untouched.
+    """
+    repo = _ScriptedRepo(tmp_path)
+    repo.ensure_supersession("doc")
+    assert repo.supersession_outcome("doc") is None
+
+
+def test_supersession_is_asked_once_per_run(tmp_path):
+    """Fifty fragments of one document ask the registry once."""
+    repo = _CurrencyRepo(tmp_path)
+    repo.ensure_supersession("doc")
+    repo.ensure_supersession("doc")
+
+    assert repo.asks == ["doc"]
+    assert repo.supersession_outcome("doc").status == "current"
+
+
+def test_supersession_is_asked_again_when_forced(tmp_path):
+    """--refresh is the flag whose whole job is to distrust a cached answer.
+
+    It matters more here than for a document: an RFC never changes once
+    published, but whether it is the one in force changes without warning.
+    """
+    repo = _CurrencyRepo(tmp_path)
+    repo.ensure_supersession("doc")
+    repo.ensure_supersession("doc", force=True)
+    assert repo.asks == ["doc", "doc"]
+
+
+def test_a_failed_lookup_is_recorded_as_unknown_and_never_raised(tmp_path):
+    """The citation is not at fault for an outage at the index.
+
+    Letting this propagate would fail an extraction that had already
+    succeeded — the document was read, the quote was found, and then a
+    question *about* the document brought the whole thing down.
+    """
+    repo = _CurrencyRepo(
+        tmp_path, raises=RepoUnavailable("scripted", "doc", "timeout"))
+    repo.ensure_supersession("doc")
+
+    outcome = repo.supersession_outcome("doc")
+    assert outcome.status == "unknown"
+    assert outcome.reason == "timeout"
+
+
+def test_a_lookup_that_breaks_in_an_unforeseen_way_is_still_unknown(tmp_path):
+    """Not every failure arrives as a RepoError.
+
+    A malformed payload reaches this as a TypeError from somewhere inside a
+    parser, and it means exactly what a timeout means: the question is open.
+    """
+    repo = _CurrencyRepo(tmp_path, raises=TypeError("not subscriptable"))
+    repo.ensure_supersession("doc")
+
+    assert repo.supersession_outcome("doc").status == "unknown"
+    assert "not subscriptable" in repo.supersession_outcome("doc").reason
+
+
+def test_a_cache_only_lookup_still_reports_what_is_on_disk(tmp_path):
+    """`--no-crawl` reads the answer; it does not pretend there isn't one.
+
+    The document itself is served from disk on such a run, so declining to
+    look at a supersession answer already sitting there would make this the
+    one thing that goes quiet about something it knows.
+    """
+    repo = _CurrencyRepo(
+        tmp_path, answer=Supersession("scripted", "doc", "superseded", ["x"]))
+    repo.ensure_supersession("doc", from_cache=True)
+
+    assert repo.from_cache_asks == [True]
+    assert repo.supersession_outcome("doc").status == "superseded"
+
+
+def test_a_cache_only_miss_records_nothing_rather_than_unknown(tmp_path):
+    """A question declined is not a question that could not be answered.
+
+    `unknown` means "asked, and could not tell". Recording it here would
+    report a failure to do the very thing the caller forbade — and would put
+    a row of caveats on every document of an offline run.
+    """
+    repo = _CurrencyRepo(
+        tmp_path, raises=RepoUnavailable("scripted", "doc", "not cached"))
+    repo.ensure_supersession("doc", from_cache=True)
+
+    assert repo.supersession_outcome("doc") is None
+
+
+def test_a_key_never_asked_has_no_supersession_outcome(tmp_path):
+    """None means the question was never put, not that the answer was good."""
+    assert _CurrencyRepo(tmp_path).supersession_outcome("doc") is None
+
+
+def test_a_document_withdrawn_with_no_successor_is_still_superseded(tmp_path):
+    """An empty successor list is a state, not a missing value.
+
+    A statute can be revoked with nothing put in its place. Requiring a
+    successor would model the IETF's habits rather than the relation.
+    """
+    repo = _CurrencyRepo(
+        tmp_path, answer=Supersession("scripted", "doc", "superseded"))
+    repo.ensure_supersession("doc")
+
+    outcome = repo.supersession_outcome("doc")
+    assert outcome.status == "superseded"
+    assert outcome.superseded_by == []
 
 
 # ── extract_line_range ───────────────────────────────────────────────────

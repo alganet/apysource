@@ -99,6 +99,39 @@ class CrawlOutcome:
 
 
 @dataclass
+class Supersession:
+    """Whether a repository still considers one of its documents to be in force.
+
+    This is the one thing about a document that can turn false while the
+    document itself does not change a byte. A citation into RFC 7231 verifies
+    exactly as it did the day it was written — the sentence is still there, in
+    the document that still says it — and is nonetheless quoting a
+    specification that was replaced in 2022. Only the repository knows, and only
+    if it has somewhere to ask.
+
+    ``status`` is deliberately three-valued. ``unknown`` is not a polite way of
+    saying ``current``: it means the repository was asked and could not answer,
+    and reporting it as a pass is how a check ends up confirming something it
+    never looked at.
+
+    ``superseded_by`` may be **empty under** ``superseded``, and that is a real
+    state rather than a missing value: a document can be withdrawn with nothing
+    put in its place. Requiring a successor would be modelling the IETF's habits
+    rather than the relation, and the relation is what other corpora share —
+    a statute is revoked whether or not another one replaces it.
+
+    The ids are the repository's own keys, not URLs or display names, so that
+    a caller can hand one straight back to the repo it came from.
+    """
+
+    repo: str
+    key: str
+    status: str  # "current" | "superseded" | "unknown"
+    superseded_by: list[str] = field(default_factory=list)
+    reason: str = ""
+
+
+@dataclass
 class TextOutcome:
     """Extracted source text, and why there is none when there is none.
 
