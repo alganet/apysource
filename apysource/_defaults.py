@@ -57,7 +57,7 @@ class Compiled:
 
     def repo_rfc(self):
         if not hasattr(self, '_repo_rfc'):
-            self._repo_rfc = apysource.repos.rfc.RfcRepo(url_pattern=self.rfc_url_pattern(), base_url=self.rfc_base_url(), draft_base_url=self.rfc_draft_base_url())
+            self._repo_rfc = apysource.repos.rfc.RfcRepo(url_pattern=self.rfc_url_pattern(), base_url=self.rfc_base_url(), draft_base_url=self.rfc_draft_base_url(), supersession_base_url=self.rfc_supersession_base_url())
         return self._repo_rfc
 
     def validate_cmd(self):
@@ -156,4 +156,7 @@ class Compiled:
 
     def rfc_draft_base_url(self):
         return 'https://datatracker.ietf.org/doc/html'
+
+    def rfc_supersession_base_url(self):
+        return 'https://datatracker.ietf.org/api/v1'
 compiled = Compiled()

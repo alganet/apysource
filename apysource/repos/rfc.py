@@ -68,6 +68,13 @@ Known limitations:
 * ``location:`` is not honoured. On an RFC there is nothing below the document
   that has a stable address — a line range into a paginated rendition names a
   different passage after the next revision. ``section:`` is the address.
+* Supersession is answered for **RFCs only**, and says so rather than guessing.
+  A draft is related by ``became_rfc``/``replaces`` and expires; a ``bcp``/``std``
+  number points into a series that is re-mapped rather than obsoleted. Neither
+  is the ``obs`` relation, so neither is reported on.
+* The answer is only as fresh as the HTTP cache it came through. ``--refresh``
+  is what re-asks, and it is what the nightly job already passes; a run off a
+  warm cache repeats whatever the index said last time.
 """
 
 from __future__ import annotations
@@ -78,7 +85,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from apysource.repos._base import BaseRepo, RepoNotFound
+from apysource.repos._base import BaseRepo, RepoNotFound, RepoUnavailable
+from apysource.results import Supersession
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +144,18 @@ _WRAPPED_HYPHEN = re.compile(r"(?<=[A-Za-z0-9])-\n[ \t]*(?=[A-Za-z0-9])")
 #: inside the cache directory merely because it arrived in a URL.
 _SAFE_KEY = re.compile(r"^(?:rfc|bcp|std)\d+$|^draft-[a-z0-9][a-z0-9.\-]*$")
 
+#: An RFC proper, as opposed to a draft or a ``bcp``/``std`` series pointer.
+#: The distinction only matters for supersession — every rendition question
+#: above treats all three the same, because all three are fetched documents.
+_RFC_KEY = re.compile(r"^rfc\d+$")
+
 _TITLE_ENDS = re.compile(r"^(Abstract|Status of [Tt]his Memo)\b")
+
+#: A document id out of a datatracker resource URI — ``/api/v1/doc/document/
+#: rfc9110/`` names ``rfc9110``. Anchored on the resource path rather than
+#: taking the last segment, so a shape this code did not anticipate is dropped
+#: rather than turned into a plausible-looking successor id.
+_DOCUMENT_URI = re.compile(r"^/api/v\d+/doc/document/([^/]+)/?$")
 
 
 def _collapse(text: str) -> str:
@@ -374,6 +393,7 @@ class RfcRepo(BaseRepo):
 
     NAME = "rfc"
     supports_crawl = True
+    supports_supersession = True
 
     # RFCs only. `CANONICAL_URL` is one template and cannot branch, and a draft
     # is named by a slug rather than by a number, so drafts are cited by URL —
@@ -383,6 +403,7 @@ class RfcRepo(BaseRepo):
     NAME_EXAMPLE = "RFC 9110"
 
     def __init__(self, *args: Any, draft_base_url: str | None = None,
+                 supersession_base_url: str | None = None,
                  **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         #: Where Internet-Drafts are fetched from. rfc-editor has none, and the
@@ -391,6 +412,15 @@ class RfcRepo(BaseRepo):
         #: same draft — the only rendition of it that carries section anchors.
         self.draft_base_url = (draft_base_url
                                or "https://datatracker.ietf.org/doc/html").rstrip("/")
+
+        #: Where "has this been replaced?" is asked. It is a different service
+        #: from either rendition host because the answer is not in either
+        #: rendition: an RFC's masthead carries the documents it *obsoletes*,
+        #: frozen at publication, and nothing at all about what obsoleted it —
+        #: which could not be otherwise, since that document did not exist yet.
+        self.supersession_base_url = (
+            supersession_base_url
+            or "https://datatracker.ietf.org/api/v1").rstrip("/")
 
     # ── Source interface ──────────────────────────────────────────────
 
@@ -459,3 +489,70 @@ class RfcRepo(BaseRepo):
             "id": key, "status": "ok", "text_chars": len(raw),
             "crawled_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    # ── Supersession interface ────────────────────────────────────────
+
+    def _supersession_url(self, key: str) -> str:
+        return (f"{self.supersession_base_url}/doc/relateddocument/"
+                f"?target__name={key}&relationship__slug=obs&format=json")
+
+    def supersession(self, key: str, *,
+                     from_cache: bool = False) -> Supersession | None:
+        """Ask datatracker whether anything has obsoleted ``key``.
+
+        Only of an RFC. The ``obs`` relation is recorded between RFCs, so for a
+        draft or a ``bcp``/``std`` number the query is answered ``total_count:
+        0`` — which does not mean "nothing has replaced this", it means the
+        relation is not defined over this kind of document at all. Read as
+        ``current`` it is a confident wrong answer, and the documents it is
+        most wrong about are the ones most likely to need it: an Internet-Draft
+        abandoned in 2012 was being counted as a document in force. Answering
+        ``None`` says the question does not apply, and nothing is reported.
+
+        What a *draft* has instead is an expiry and a `replaces` chain, and
+        a ``bcp``/``std`` number is a pointer into a series whose membership is
+        re-mapped rather than obsoleted. Both are real questions; neither is
+        this one.
+
+        One hop, and only what the registry actually asserts. RFC 2616 comes
+        back as the six documents that replaced it, not as the three that
+        replaced *those* — the chain is real, but following it would report a
+        conclusion of ours as though the publisher had drawn it, and every hop
+        costs a request into a fan-out that has no natural end.
+
+        The query is answered through ``self.fetch``, so this inherits the
+        HTTP cache, the politeness delay, and the 404-versus-outage distinction
+        rather than restating any of them. No sidecar file: the JSON is a
+        fetched document like any other, ``--refresh`` re-asks, and the cache
+        the nightly job already keeps carries it.
+        """
+        import json
+
+        if not _RFC_KEY.match(key):
+            return None
+
+        url = self._supersession_url(key)
+        raw = self.fetch(url, key, from_cache=from_cache)
+
+        try:
+            payload = json.loads(raw)
+            objects = payload["objects"]
+        except (ValueError, KeyError, TypeError) as e:
+            # The index answered with something this code does not understand.
+            # That is an open question, not a current document: saying
+            # "current" here would be inventing the reassuring answer.
+            raise RepoUnavailable(
+                self.NAME, key, f"{url} did not answer with a relation list: {e}",
+            ) from e
+
+        successors = []
+        for obj in objects:
+            match = _DOCUMENT_URI.match(str(obj.get("source") or ""))
+            if match:
+                successors.append(match.group(1))
+
+        if not successors:
+            return Supersession(self.NAME, key, "current")
+
+        return Supersession(self.NAME, key, "superseded",
+                            superseded_by=sorted(successors))

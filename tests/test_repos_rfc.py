@@ -20,13 +20,15 @@ document already, so the interesting claim about it is that nothing happens to
 it, and a small document proves that better than a 440 KB one.
 """
 
+import json
 from pathlib import Path
 
 import pytest
 
 from apysource.formats import HtmlFormat, extract_content, normalize_ws
-from apysource.repos._base import RepoNotFound
+from apysource.repos._base import RepoNotFound, RepoUnavailable
 from apysource.repos.rfc import RfcRepo, is_preformatted, render
+from apysource.results import Supersession
 
 from tests.conftest import MockFetcher
 
@@ -450,3 +452,136 @@ def test_an_empty_document_is_never_written_to_the_cache(tmp_path):
     with pytest.raises(RepoNotFound):
         repo.crawl("rfc8288")
     assert not list(tmp_path.glob("*.html"))
+
+
+# ── Supersession ──────────────────────────────────────────────────────────
+#
+# The payloads below are datatracker's, recorded verbatim and then trimmed to
+# the two keys this code reads. The relation is asked of a *registry* rather
+# than of the document because it is not in the document: an RFC's masthead
+# carries what it obsoletes, frozen at publication, and necessarily nothing
+# about what obsoleted it.
+
+def _relations(*sources):
+    return json.dumps({
+        "meta": {"limit": 20, "next": None, "offset": 0, "previous": None,
+                 "total_count": len(sources)},
+        "objects": [{"relationship": "/api/v1/name/docrelationshipname/obs/",
+                     "source": f"/api/v1/doc/document/{name}/",
+                     "target": "/api/v1/doc/document/rfcX/"}
+                    for name in sources],
+    })
+
+
+def test_a_document_nothing_has_replaced_is_current(tmp_path):
+    repo = _rfc(tmp_path, MockFetcher(content=_relations()))
+    assert repo.supersession("rfc9110") == Supersession("rfc", "rfc9110", "current")
+
+
+def test_a_replaced_document_names_what_replaced_it(tmp_path):
+    repo = _rfc(tmp_path, MockFetcher(content=_relations("rfc9110")))
+    outcome = repo.supersession("rfc7231")
+
+    assert outcome.status == "superseded"
+    assert outcome.superseded_by == ["rfc9110"]
+
+
+def test_a_document_split_into_several_names_all_of_them(tmp_path):
+    """RFC 2616 was not replaced by one document but by six.
+
+    Reporting only the first would name an arbitrary member of a set the
+    registry hands over whole, and the reader would have no way to tell that
+    anything had been dropped.
+    """
+    repo = _rfc(tmp_path, MockFetcher(content=_relations(
+        "rfc7235", "rfc7230", "rfc7233", "rfc7231", "rfc7234", "rfc7232")))
+
+    assert repo.supersession("rfc2616").superseded_by == [
+        "rfc7230", "rfc7231", "rfc7232", "rfc7233", "rfc7234", "rfc7235"]
+
+
+def test_the_chain_is_not_followed(tmp_path):
+    """One hop, and only what the registry actually asserts.
+
+    RFC 7231 is what replaced RFC 2616, and RFC 9110 is what replaced *that*.
+    Reporting 9110 here would present a conclusion of ours as the publisher's,
+    and the fan-out has no natural end — 2616 alone would send six more.
+    """
+    fetcher = MockFetcher(content=_relations("rfc7231"))
+    repo = _rfc(tmp_path, fetcher)
+
+    assert repo.supersession("rfc2616").superseded_by == ["rfc7231"]
+    assert len(fetcher.calls) == 1
+
+
+def test_the_question_is_asked_of_the_relation_registry(tmp_path):
+    fetcher = MockFetcher(content=_relations())
+    _rfc(tmp_path, fetcher).supersession("rfc9110")
+
+    assert fetcher.calls == [
+        "https://datatracker.ietf.org/api/v1/doc/relateddocument/"
+        "?target__name=rfc9110&relationship__slug=obs&format=json"]
+
+
+def test_an_unreachable_registry_leaves_the_question_open(tmp_path):
+    """Not "current". A timeout is the absence of knowledge, not good news.
+
+    Answering `current` here would be the reassuring guess, and it is the one
+    answer this must never give: a citation into a replaced document would go
+    out green for as long as the outage lasted.
+    """
+    fetcher = MockFetcher(content=None, statuses={"relateddocument": None})
+    repo = _rfc(tmp_path, fetcher)
+
+    with pytest.raises(RepoUnavailable):
+        repo.supersession("rfc7231")
+
+    repo.ensure_supersession("rfc7231")
+    assert repo.supersession_outcome("rfc7231").status == "unknown"
+
+
+def test_a_registry_answering_nonsense_leaves_the_question_open(tmp_path):
+    """A body that is not a relation list is an open question, not a pass."""
+    repo = _rfc(tmp_path, MockFetcher(content="<html>bad gateway</html>"))
+
+    with pytest.raises(RepoUnavailable):
+        repo.supersession("rfc7231")
+
+
+def test_a_relation_shape_this_code_does_not_know_is_dropped(tmp_path):
+    """Better to say nothing than to mint a plausible-looking successor id.
+
+    The anchored match is what makes this a decision rather than an accident:
+    taking the last path segment would turn any URI at all into a document
+    name, and the report would carry it as though datatracker had said it.
+    """
+    repo = _rfc(tmp_path, MockFetcher(content=json.dumps(
+        {"objects": [{"source": "/api/v2/something/else/rfc9110/"},
+                     {"source": None}]})))
+
+    assert repo.supersession("rfc2616").status == "current"
+
+
+def test_only_an_rfc_is_asked_about(tmp_path):
+    """`obs` is recorded between RFCs, so a zero answer for anything else is
+    "the relation does not apply", not "nothing has replaced this".
+
+    Read as `current` it is a confident wrong answer, and worst on exactly the
+    documents that need it most: an Internet-Draft abandoned in 2012 was being
+    counted as a document still in force.
+    """
+    fetcher = MockFetcher(content=_relations())
+    repo = _rfc(tmp_path, fetcher)
+
+    for key in ("draft-thomson-hybi-http-timeout-03", "bcp13", "std66"):
+        assert repo.supersession(key) is None, key
+
+    assert fetcher.calls == [], "nothing should have been asked"
+
+
+def test_a_document_the_question_does_not_apply_to_records_nothing(tmp_path):
+    """None is not `current`, and must not reach the report as a pass."""
+    repo = _rfc(tmp_path, MockFetcher(content=_relations()))
+    repo.ensure_supersession("draft-thomson-hybi-http-timeout-03")
+
+    assert repo.supersession_outcome("draft-thomson-hybi-http-timeout-03") is None

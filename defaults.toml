@@ -68,6 +68,12 @@ rfc_base_url = "https://www.rfc-editor.org/rfc"
 # of it that carries section anchors, so that is what an archive URL is answered
 # from.
 rfc_draft_base_url = "https://datatracker.ietf.org/doc/html"
+# Whether an RFC has been replaced is not in the RFC. Its masthead carries the
+# documents it *obsoletes*, frozen at publication, and necessarily nothing about
+# what obsoleted it. Datatracker's relation API is the forward direction, and it
+# is asked one document at a time so a collection citing three RFCs pays for
+# three answers rather than for the whole index.
+rfc_supersession_base_url = "https://datatracker.ietf.org/api/v1"
 # No rfc_crawl_delay, and that is the decision: MDN sets one because
 # raw.githubusercontent is a CDN. rfc-editor is a courtesy-bound origin server,
 # so this repo takes the registry's default_crawl_delay.
@@ -109,6 +115,7 @@ crawl_delay = "{mdn_crawl_delay}"
 url_pattern = "{rfc_url_pattern}"
 base_url = "{rfc_base_url}"
 draft_base_url = "{rfc_draft_base_url}"
+supersession_base_url = "{rfc_supersession_base_url}"
 
 # ── Registry (shared cache_dir, http_client and crawl delay for repos) ───
 
