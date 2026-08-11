@@ -19,9 +19,11 @@ from apysource.results import (
     Failure,
     FetcherResult,
     RepoResult,
+    Supersession,
     TextOutcome,
 )
 from apysource.verification import (
+    failed,
     json_report,
     print_report,
     run_checks,
@@ -560,7 +562,8 @@ class _NoCrawlerRepo(BaseRepo):
         return None
 
 
-def _repo_run(repo, *, strict=False, snippet=None, fetcher=None):
+def _repo_run(repo, *, strict=False, snippet=None, fetcher=None,
+              strict_supersession=False, crawl=True):
     """Run the full checks over one repo-claimed source."""
     frag = URIRef("http://x/frag")
     g = build_chain_graph(frag, URIRef("http://x/src"),
@@ -574,7 +577,8 @@ def _repo_run(repo, *, strict=False, snippet=None, fetcher=None):
 
     checks_config = [{"name": "Fragments", "class_uri": SV.Fragment, "mode": "chain"}]
     results = run_checks(g, checks_config, RepoRegistry([repo]),
-                         fetcher=fetcher or MockFetcher(), strict_repos=strict)
+                         fetcher=fetcher or MockFetcher(), strict_repos=strict,
+                         strict_supersession=strict_supersession, crawl=crawl)
     return {c.name: c for c in results}
 
 
@@ -657,6 +661,153 @@ def test_the_repo_check_is_absent_without_repos():
         results = run_checks(g, checks_config, EMPTY_REGISTRY,
                              fetcher=MockFetcher())
     assert all(c.name != "Repo documents" for c in results)
+
+
+# ── Document supersession ────────────────────────────────────────────────
+#
+# The only check here that asks whether this is still the source, rather than
+# whether the source still says this.
+
+class _CurrencyRepo(_ScriptedRepo):
+    """A repo whose publisher records when a document has been replaced."""
+
+    supports_supersession = True
+
+    def __init__(self, tmp_path, status="current", by=(), outcome="ok"):
+        super().__init__(tmp_path, outcome=outcome)
+        self.status = status
+        self.by = list(by)
+        self.asks = 0
+        self.from_cache_asks = []
+
+    def supersession(self, key, *, from_cache=False):
+        self.asks += 1
+        self.from_cache_asks.append(from_cache)
+        if self.status == "unknown":
+            raise RepoUnavailable(self.NAME, key, "connection reset")
+        return Supersession(self.NAME, key, self.status, superseded_by=self.by)
+
+
+def test_a_document_still_in_force_passes_the_supersession_check(tmp_path):
+    check = _repo_run(_CurrencyRepo(tmp_path))["Document supersession"]
+    assert (check.ok, check.total) == (1, 1)
+    assert check.failures == [] and check.warnings == []
+
+
+def test_a_superseded_document_warns_and_names_its_successor(tmp_path):
+    """The run stays green. The quote is there; it is the document that moved on.
+
+    Citing a replaced document is sometimes the only option available — the
+    successor may have deleted the very thing being described — so this is a
+    thing to know, not a thing to fail on.
+    """
+    checks = _repo_run(_CurrencyRepo(tmp_path, "superseded", ["rfc9110"]),
+                       snippet="the document the document")
+
+    check = checks["Document supersession"]
+    assert check.failures == []
+    assert len(check.warnings) == 1
+    assert "superseded by rfc9110" in check.warnings[0].reason
+
+    # The quote itself verified, and the run goes out green. The two are
+    # independent findings: the sentence really is in that document, and that
+    # document really has been replaced.
+    assert checks["Fragments: snippet verified"].failures == []
+    assert not failed(list(checks.values()))
+
+
+def test_a_document_withdrawn_with_no_successor_says_so(tmp_path):
+    """An empty successor list must not read as "replaced by nothing in
+    particular, we just didn't look it up"."""
+    checks = _repo_run(_CurrencyRepo(tmp_path, "superseded"))
+    reason = checks["Document supersession"].warnings[0].reason
+    assert "with no replacement named" in reason
+
+
+def test_strict_supersession_turns_the_warning_into_a_failure(tmp_path):
+    """For a collection that means to track only documents in force."""
+    checks = _repo_run(_CurrencyRepo(tmp_path, "superseded", ["rfc9110"]),
+                       snippet="the document the document",
+                       strict_supersession=True)
+
+    check = checks["Document supersession"]
+    assert len(check.failures) == 1 and check.warnings == []
+    assert failed(list(checks.values()))
+
+
+def test_an_undetermined_currency_is_reported_rather_than_assumed_good(tmp_path):
+    """Silence would render "we could not tell" as green.
+
+    This is the argument the redirect check makes for reporting an unrecorded
+    destination instead of skipping it, and it applies here unchanged.
+    """
+    check = _repo_run(_CurrencyRepo(tmp_path, "unknown"))["Document supersession"]
+
+    assert (check.ok, check.total) == (0, 1)
+    assert len(check.warnings) == 1
+    assert "could not determine" in check.warnings[0].reason
+    assert "connection reset" in check.warnings[0].reason
+
+
+def test_a_repo_that_does_not_track_supersession_produces_no_row(tmp_path):
+    """There is no such thing as an obsolete Wiktionary entry.
+
+    A row of zeroes would be an answer to a question nobody can ask, and the
+    reader would be left to work out which of "none" and "not applicable" it
+    meant.
+    """
+    assert "Document supersession" not in _repo_run(_ScriptedRepo(tmp_path))
+
+
+def test_a_warm_cache_still_reports_a_superseded_document(tmp_path):
+    """The load-bearing case, and the one an obvious implementation loses.
+
+    A crawl happens only when the cache is cold, so anything hung off it goes
+    quiet on a warm run — which is exactly the run where this has had time to
+    become true. The document was cached while it was current and replaced
+    afterwards; not one byte of it changed.
+
+    Note what the repo check does on this same run: nothing, correctly, because
+    nothing was crawled. These two must not share a trigger.
+    """
+    (tmp_path / "doc.txt").write_text("already here " * 20)
+    repo = _CurrencyRepo(tmp_path, "superseded", ["rfc9110"])
+    checks = _repo_run(repo)
+
+    assert "Repo documents" not in checks
+    assert len(checks["Document supersession"].warnings) == 1
+    assert repo.asks == 1
+
+
+def test_an_offline_run_still_reports_from_a_cached_answer(tmp_path):
+    """`--no-crawl` verifies quotes from disk; this must read from disk too.
+
+    Found by running the real corpus: every quote verified against a fully
+    warm cache and six superseded documents went unmentioned, while the
+    answers for all of them were already in the HTTP cache. Skipping the
+    lookup entirely made this the one check that stayed quiet about something
+    it knew.
+    """
+    (tmp_path / "doc.txt").write_text("already here " * 20)
+    repo = _CurrencyRepo(tmp_path, "superseded", ["rfc9110"])
+    checks = _repo_run(repo, crawl=False)
+
+    assert len(checks["Document supersession"].warnings) == 1
+    assert repo.from_cache_asks == [True]
+
+
+def test_an_offline_run_with_no_cached_answer_says_nothing(tmp_path):
+    """Not a row of "unknown" per document. We declined to ask."""
+    (tmp_path / "doc.txt").write_text("already here " * 20)
+    repo = _CurrencyRepo(tmp_path, "unknown")
+    assert "Document supersession" not in _repo_run(repo, crawl=False)
+
+
+def test_the_supersession_question_is_asked_once_for_the_run(tmp_path):
+    """Resolution and prefetch both reach for it; the memo makes that one ask."""
+    repo = _CurrencyRepo(tmp_path)
+    _repo_run(repo)
+    assert repo.asks == 1
 
 
 # ── Naming failures (A3) ─────────────────────────────────────────────────

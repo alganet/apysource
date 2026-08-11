@@ -27,7 +27,9 @@ class CheckSourcesCommand:
     any failure. Accepts ``--refresh`` (re-fetch and re-crawl, bypassing the
     caches), ``--strict-redirects`` (fail, rather than warn, on a source URL
     that has moved), ``--strict-repos`` (fail on a repo that claimed a URL but
-    could not serve it), ``--no-crawl`` (never fetch a repo document that is
+    could not serve it), ``--strict-supersession`` (fail on a citation into a
+    document its publisher has replaced), ``--no-crawl`` (never fetch a repo
+    document that is
     not already cached), ``--format json`` (a machine-readable report; stdout
     then carries only JSON) and ``--provenance <file>`` (write a PROV-O graph).
     """
@@ -68,6 +70,13 @@ class CheckSourcesCommand:
         # the snippet was still checked, but against the fetched page rather
         # than the repository the citation names. --strict-repos fails on it.
         strict_repos, args = pop_flag(args, "--strict-repos")
+
+        # A citation into a document its publisher has replaced warns by
+        # default: the quote is genuinely there, and citing a superseded
+        # document is sometimes the only option — the successor may have
+        # deleted the very thing being described. --strict-supersession fails
+        # on it, for a collection that means to track only documents in force.
+        strict_supersession, args = pop_flag(args, "--strict-supersession")
 
         # --no-crawl refuses to fetch a repo document that is not cached,
         # reporting the miss instead of quietly fetching a different document.
@@ -137,7 +146,9 @@ class CheckSourcesCommand:
         results = check_graph(g, registry=self.registry, fetcher=self.fetcher,
                               emit_provenance=emit_prov, force=force,
                               strict_redirects=strict_redirects,
-                              strict_repos=strict_repos, crawl=not no_crawl,
+                              strict_repos=strict_repos,
+                              strict_supersession=strict_supersession,
+                              crawl=not no_crawl,
                               validate_shapes=check_shapes,
                               document_cache_bytes=self.document_cache_bytes)
 

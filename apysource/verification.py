@@ -313,10 +313,85 @@ def _repo_check(name: str, results: list[Any], strict: bool = False) -> CheckRes
     return CheckResult(name, ok, total, failures=hard, warnings=soft)
 
 
+def _supersession_check(name: str, results: list[Any],
+                        strict: bool = False) -> CheckResult:
+    """Report cited documents their publisher has since replaced.
+
+    The quote is still there and the document still says it; what changed is
+    that the document is no longer the one in force. Every other check here
+    asks whether the source still says this. This is the only one that asks
+    whether this is still the source.
+
+    Like ``_repo_check`` it performs no I/O — it reads what the extraction
+    phase recorded — and unlike ``_repo_check`` it is *not* silent on a warm
+    cache. See ``BaseRepo.ensure_supersession`` for why that distinction is the
+    whole feature.
+
+    A repo that does not support the notion contributes nothing, not even a
+    total: there is no such thing as an obsolete Wiktionary entry, and a row
+    reporting one would be an answer to a question nobody can ask. A repo that
+    *does* support it and could not reach its index reports ``unknown``, for
+    the reason ``_redirect_check`` reports an unrecorded destination rather
+    than skipping it — silence would render "we could not tell" as green.
+    """
+    ok = 0
+    records = []
+    seen: set[tuple[str, str]] = set()
+
+    for result in results:
+        if not isinstance(result, RepoResult) or result.repo is None:
+            continue
+
+        outcome_for = getattr(result.repo, "supersession_outcome", None)
+        if outcome_for is None:
+            continue
+        outcome = outcome_for(result.key)
+        if outcome is None:  # never asked: unsupported, or crawling was off
+            continue
+
+        ident = (outcome.repo, outcome.key)
+        if ident in seen:
+            continue
+        seen.add(ident)
+
+        if outcome.status == "current":
+            ok += 1
+        elif outcome.status == "superseded":
+            # A successor list is what makes this actionable, but its absence
+            # is not a defect in the report: a document can be withdrawn with
+            # nothing put in its place, and saying so plainly beats implying
+            # that the replacement is merely unnamed.
+            by = (f" by {', '.join(outcome.superseded_by)}"
+                  if outcome.superseded_by else ", with no replacement named")
+            records.append(Failure(
+                result.source or outcome.repo, result.url or outcome.key,
+                f"{outcome.repo} says {outcome.key} has been superseded{by}. "
+                f"The quote was verified and is still there — but it is in a "
+                f"document that is no longer the one in force.",
+                url=result.url,
+            ))
+        else:
+            records.append(Failure(
+                result.source or outcome.repo, result.url or outcome.key,
+                f"{outcome.repo} could not determine whether {outcome.key} is "
+                f"still in force"
+                + (f": {outcome.reason}" if outcome.reason else "")
+                + ". Whether this citation names a superseded document is "
+                  "unknown.",
+                url=result.url,
+            ))
+
+    total = ok + len(records)
+    if strict:
+        return CheckResult(name, ok, total, failures=records)
+    return CheckResult(name, ok, total, warnings=records)
+
+
 def run_checks(
     g: Graph, checks_config: list[dict[str, Any]], registry: RepoRegistry,
     fetcher: Any = None, emit_provenance: bool = False, force: bool = False,
     strict_redirects: bool = False, strict_repos: bool = False,
+    strict_supersession: bool = False,
     crawl: bool = True, document_cache_bytes: int = DEFAULT_MAX_BYTES,
 ) -> list[CheckResult] | tuple[list[CheckResult], Graph]:
     """Run all checks, return structured results.
@@ -432,6 +507,14 @@ def run_checks(
     repos = _repo_check("Repo documents", resolved_sources, strict_repos)
     if repos.total:
         results.append(repos)
+
+    # Gated on `.total` like the two above: a corpus with no repo that tracks
+    # supersession prints no row at all, rather than a row of zeroes inviting
+    # someone to work out which of "none" and "not applicable" it means.
+    superseded = _supersession_check("Document supersession", resolved_sources,
+                                     strict_supersession)
+    if superseded.total:
+        results.append(superseded)
 
     _attach_cite_sites(g, results)
 

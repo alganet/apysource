@@ -275,6 +275,26 @@ def _load_repo_text(result: RepoResult, max_chars: int | None, *,
     path = Path(result.cache_file) if result.cache_file else None
     stale = force or path is None or not path.exists()
 
+    # Asked whatever the cache holds, and that placement is the point. The
+    # crawl below runs only when the document is stale, but a document does not
+    # have to change in order to stop being the one in force — it is replaced
+    # by a *different* document, somewhere else. Put this inside the `stale`
+    # branch and the check goes quiet on exactly the run where the answer has
+    # had time to become interesting. It costs at most one request per document
+    # per run: `ensure_supersession` memoizes, and repos that do not support it
+    # return immediately.
+    #
+    # Fetched through `getattr` because a repo is duck-typed here — a custom
+    # one written before this existed has no such method, and its absence is
+    # the same statement `supports_supersession = False` makes.
+    # Under `crawl=False` this reads the cache rather than going quiet: the
+    # document itself is served from disk on such a run and its absence is
+    # *reported*, so declining to look at an answer already sitting there
+    # would be the odd one out. A cache-only miss records nothing.
+    ensure_supersession = getattr(repo, "ensure_supersession", None)
+    if result.key and ensure_supersession is not None:
+        ensure_supersession(result.key, force=force, from_cache=not crawl)
+
     if stale and result.key:
         if not crawl:
             return TextOutcome(
@@ -439,6 +459,17 @@ def prefetch(results: Iterable[ResolveResult], *, cache: DocumentCache,
             # back off disk.
             cache.body(key, lambda: fetcher.get(url, force=forced))
         elif isinstance(result, RepoResult) and result.repo is not None:
+            if result.key:
+                # Warmed here too, so the lookups ride the same worker pool
+                # instead of costing one politeness delay each on the serial
+                # pass. Both calls are the memoized one, so this is still a
+                # single request per document — `claim_force` above keeps that
+                # true under --refresh as well.
+                ensure_supersession = getattr(
+                    result.repo, "ensure_supersession", None)
+                if ensure_supersession is not None:
+                    ensure_supersession(result.key, force=forced,
+                                        from_cache=not crawl)
             if crawl and result.key:
                 result.repo.ensure(result.key, force=forced)
 

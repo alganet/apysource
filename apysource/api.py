@@ -62,6 +62,7 @@ def check_graph(
     force: bool = False,
     strict_redirects: bool = False,
     strict_repos: bool = False,
+    strict_supersession: bool = False,
     crawl: bool = True,
     emit_provenance: bool = False,
     validate_shapes: bool = False,
@@ -97,6 +98,7 @@ def check_graph(
         force=force,
         strict_redirects=strict_redirects,
         strict_repos=strict_repos,
+        strict_supersession=strict_supersession,
         crawl=crawl,
         document_cache_bytes=document_cache_bytes,
     )
