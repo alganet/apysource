@@ -48,7 +48,7 @@ dev = [
     "apywire>=1.0",
     "mypy>=1.0",
     "ruff>=0.6",
-    "pylode>=3.0,<3.6",
+    "pylode>=3.0,<3.7",
 ]
 
 [tool.setuptools.dynamic]
